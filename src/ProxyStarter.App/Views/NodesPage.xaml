@@ -1,0 +1,212 @@
+<Page x:Class="ProxyStarter.App.Views.NodesPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:models="clr-namespace:ProxyStarter.App.Models"
+      mc:Ignorable="d">
+    <Page.Resources>
+        <Style x:Key="NodeTagStyle" TargetType="Border">
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+
+        <Style x:Key="NodeCardBorderStyle" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="12" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsActive}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentFillColorSecondaryBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <DataTemplate x:Key="NodeCardTemplate" DataType="{x:Type models:ProxyNode}">
+            <Border Style="{StaticResource NodeCardBorderStyle}"
+                    Cursor="Hand">
+                <Border.InputBindings>
+                    <MouseBinding MouseAction="LeftClick"
+                                  Command="{Binding DataContext.SelectNodeFromCardCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                  CommandParameter="{Binding}" />
+                </Border.InputBindings>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel>
+                        <TextBlock Text="{Binding Name}"
+                                   FontSize="16"
+                                   FontWeight="SemiBold"
+                                   TextTrimming="CharacterEllipsis" />
+                        <WrapPanel Margin="0,6,0,0">
+                            <Border Style="{StaticResource NodeTagStyle}" DataContext="{Binding TypeDisplay}">
+                                <TextBlock Text="{Binding}" />
+                            </Border>
+                        </WrapPanel>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    Margin="0,0,0,6">
+                            <TextBlock FontWeight="SemiBold"
+                                       Foreground="{Binding LatencyMs, Converter={StaticResource LatencyForegroundConverter}}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Text" Value="{Binding LatencyMs}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding LatencyMs}" Value="-1">
+                                                <Setter Property="Text" Value="" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock Text="ms"
+                                       Opacity="0.7"
+                                       Margin="4,0,0,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding LatencyMs}" Value="-1">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+
+                        <ui:Button Content="{DynamicResource Text_ConnectTest}"
+                                   Appearance="Secondary"
+                                   Command="{Binding DataContext.ConnectTestNodeCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                   CommandParameter="{Binding}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </Page.Resources>
+
+    <Grid Margin="16"
+          MinHeight="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=ui:NavigationView}}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="{DynamicResource Text_Nodes}"
+                   FontSize="28"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,16" />
+
+        <ui:Card Grid.Row="1"
+                 Padding="16"
+                 HorizontalAlignment="Stretch"
+                 VerticalAlignment="Stretch"
+                 HorizontalContentAlignment="Stretch"
+                 VerticalContentAlignment="Stretch">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <WrapPanel Orientation="Horizontal" Margin="0,0,12,0">
+                        <ui:Button Content="{DynamicResource Text_Refresh}" Command="{Binding RefreshNodesCommand}" Margin="0,0,8,8" />
+                        <ui:Button Content="{DynamicResource Text_TcpTest}" Command="{Binding TcpTestCommand}" Margin="0,0,8,8" />
+                        <ui:Button Content="{DynamicResource Text_ConnectTest}" Command="{Binding ConnectTestCommand}" Margin="0,0,8,8" />
+                        <ui:Button Content="{DynamicResource Text_TcpTestAll}" Command="{Binding TcpTestAllCommand}" Margin="0,0,8,8" />
+                        <ui:Button Content="{DynamicResource Text_ConnectTestAll}" Command="{Binding ConnectTestAllCommand}" Margin="0,0,8,8" />
+                    </WrapPanel>
+
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <TextBlock Text="{DynamicResource Text_SelectionGroup}"
+                                   Opacity="0.7"
+                                   Margin="0,0,8,0"
+                                   VerticalAlignment="Center" />
+                        <ComboBox ItemsSource="{Binding Groups}"
+                                  SelectedItem="{Binding SelectedGroup}"
+                                  Width="200"
+                                  Style="{StaticResource CrispComboBoxStyle}" />
+                    </StackPanel>
+                </Grid>
+
+                <Border x:Name="NodesListHost"
+                        Grid.Row="1"
+                        Background="{DynamicResource LayerOnAcrylicFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Padding="6">
+                    <ui:ListView x:Name="NodesList"
+                                 ItemsSource="{Binding NodeRows}"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 VirtualizingPanel.IsVirtualizing="True"
+                                 VirtualizingPanel.VirtualizationMode="Recycling"
+                                 VirtualizingStackPanel.ScrollUnit="Pixel"
+                                 VirtualizingStackPanel.CacheLength="2"
+                                 VirtualizingStackPanel.CacheLengthUnit="Page"
+                                 ScrollViewer.CanContentScroll="True"
+                                 VerticalContentAlignment="Top">
+                        <ui:ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </ui:ListView.ItemContainerStyle>
+                        <ui:ListView.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ui:ListView.ItemsPanel>
+                        <ui:ListView.ItemTemplate>
+                            <DataTemplate DataType="{x:Type models:NodeCardRow}">
+                                <ItemsControl ItemsSource="{Binding Items}"
+                                              Margin="0,0,0,8">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <UniformGrid Rows="1"
+                                                         Columns="{Binding DataContext.CardsPerRow, RelativeSource={RelativeSource AncestorType=Page}, FallbackValue=2}" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <StaticResource ResourceKey="NodeCardTemplate" />
+                                    </ItemsControl.ItemTemplate>
+                                    <ItemsControl.ItemContainerStyle>
+                                        <Style TargetType="ContentPresenter">
+                                            <Setter Property="Margin" Value="0,0,12,0" />
+                                            <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                        </Style>
+                                    </ItemsControl.ItemContainerStyle>
+                                </ItemsControl>
+                            </DataTemplate>
+                        </ui:ListView.ItemTemplate>
+                    </ui:ListView>
+                </Border>
+            </Grid>
+        </ui:Card>
+    </Grid>
+</Page>

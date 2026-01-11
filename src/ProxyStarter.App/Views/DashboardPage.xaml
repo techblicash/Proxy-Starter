@@ -1,0 +1,101 @@
+﻿<Page x:Class="ProxyStarter.App.Views.DashboardPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      mc:Ignorable="d">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16">
+            <TextBlock Text="{DynamicResource Text_Dashboard}"
+                       FontSize="28"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,16" />
+
+            <Grid Margin="0,0,0,16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <ui:Card Grid.Row="0" Grid.Column="0" Padding="16" Margin="0,0,12,0">
+                    <StackPanel>
+                        <TextBlock Text="{DynamicResource Text_CoreStatus}" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding StatusText}" FontSize="22" Margin="0,8,0,0" />
+                        <TextBlock Text="{DynamicResource Text_Mode}" Opacity="0.7" Margin="0,12,0,0" />
+                        <TextBlock Text="{Binding Mode}" FontSize="14" />
+                        <ui:Button Content="{Binding CoreToggleLabel}"
+                                   Command="{Binding ToggleCoreCommand}"
+                                   Margin="0,12,0,0" />
+                    </StackPanel>
+                </ui:Card>
+
+                <ui:Card Grid.Row="0" Grid.Column="1" Padding="16" Margin="0,0,12,0">
+                    <StackPanel>
+                        <TextBlock Text="{DynamicResource Text_Traffic}" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="{DynamicResource Text_Download}" Opacity="0.7" Margin="0,12,0,0" />
+                        <TextBlock Text="{Binding DownloadSpeed}" FontSize="18" />
+                        <TextBlock Text="{DynamicResource Text_Upload}" Opacity="0.7" Margin="0,12,0,0" />
+                        <TextBlock Text="{Binding UploadSpeed}" FontSize="18" />
+                        <TextBlock Text="{DynamicResource Text_Total}" Opacity="0.7" Margin="0,12,0,0" />
+                        <TextBlock Text="{Binding DownloadTotal}" />
+                        <TextBlock Text="{Binding UploadTotal}" />
+                    </StackPanel>
+                </ui:Card>
+
+                <ui:Card Grid.Row="0" Grid.Column="2" Padding="16">
+                    <StackPanel>
+                        <TextBlock Text="{DynamicResource Text_Session}" FontSize="16" FontWeight="SemiBold" />
+                        <TextBlock Text="{DynamicResource Text_Profile}" Opacity="0.7" Margin="0,12,0,0" />
+                        <TextBlock Text="{Binding ActiveProfile}" />
+                        <TextBlock Text="{DynamicResource Text_Node}" Opacity="0.7" Margin="0,12,0,0" />
+                        <TextBlock Text="{Binding ActiveNode}" />
+                        <TextBlock Text="{DynamicResource Text_Address}" Opacity="0.7" Margin="0,12,0,0" />
+                        <TextBlock Text="{Binding CurrentAddress}" TextWrapping="Wrap" />
+                    </StackPanel>
+                </ui:Card>
+
+                <ui:Card Grid.Row="1" Grid.ColumnSpan="3" Padding="16" Margin="0,12,0,0">
+                    <StackPanel>
+                        <TextBlock Text="{DynamicResource Text_Network}" FontSize="16" FontWeight="SemiBold" />
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <StackPanel Margin="0,0,12,0">
+                                <TextBlock Text="{DynamicResource Text_Mixed}" Opacity="0.7" />
+                                <TextBox Text="{Binding MixedPort}" Width="120" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,12,0">
+                                <TextBlock Text="{DynamicResource Text_HTTP}" Opacity="0.7" />
+                                <TextBox Text="{Binding HttpPort}" Width="120" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,12,0">
+                                <TextBlock Text="{DynamicResource Text_SOCKS}" Opacity="0.7" />
+                                <TextBox Text="{Binding SocksPort}" Width="120" />
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="{DynamicResource Text_API}" Opacity="0.7" />
+                                <TextBox Text="{Binding ApiPort}" Width="120" />
+                            </StackPanel>
+                        </StackPanel>
+                        <CheckBox Content="{DynamicResource Text_EnableTun}" IsChecked="{Binding TunEnabled}" Margin="0,12,0,0" />
+                        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <ui:Button Content="{DynamicResource Text_Apply}" Command="{Binding SaveNetworkCommand}" Margin="0,0,8,0" />
+                            <ui:Button Content="{DynamicResource Text_Reload}" Command="{Binding ReloadNetworkCommand}" />
+                        </StackPanel>
+                    </StackPanel>
+                </ui:Card>
+            </Grid>
+
+            <ui:Card Padding="16">
+                <StackPanel>
+                    <TextBlock Text="{DynamicResource Text_Notes}" FontSize="16" FontWeight="SemiBold" />
+                    <TextBlock Text="{DynamicResource Text_NotesHint}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+            </ui:Card>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

@@ -1,0 +1,116 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+    <sys:String x:Key="Text_AppName">代理启动器</sys:String>
+    <sys:String x:Key="Text_Dashboard">仪表盘</sys:String>
+    <sys:String x:Key="Text_Profiles">订阅</sys:String>
+    <sys:String x:Key="Text_Nodes">节点</sys:String>
+    <sys:String x:Key="Text_Rules">规则</sys:String>
+    <sys:String x:Key="Text_Connections">连接</sys:String>
+    <sys:String x:Key="Text_Logs">日志</sys:String>
+    <sys:String x:Key="Text_Settings">设置</sys:String>
+
+    <sys:String x:Key="Text_CoreStatus">核心状态</sys:String>
+    <sys:String x:Key="Text_Mode">模式</sys:String>
+    <sys:String x:Key="Text_Traffic">流量</sys:String>
+    <sys:String x:Key="Text_Download">下载</sys:String>
+    <sys:String x:Key="Text_Upload">上传</sys:String>
+    <sys:String x:Key="Text_Total">总计</sys:String>
+    <sys:String x:Key="Text_TotalLabel">总计:</sys:String>
+    <sys:String x:Key="Text_Session">会话</sys:String>
+    <sys:String x:Key="Text_Profile">订阅</sys:String>
+    <sys:String x:Key="Text_Node">节点</sys:String>
+    <sys:String x:Key="Text_Address">地址</sys:String>
+    <sys:String x:Key="Text_Notes">说明</sys:String>
+    <sys:String x:Key="Text_NotesHint">核心 API 连接后将显示状态、流量和地址数据。</sys:String>
+    <sys:String x:Key="Text_Network">网络</sys:String>
+    <sys:String x:Key="Text_Mixed">混合</sys:String>
+    <sys:String x:Key="Text_HTTP">HTTP</sys:String>
+    <sys:String x:Key="Text_SOCKS">SOCKS</sys:String>
+    <sys:String x:Key="Text_API">API</sys:String>
+    <sys:String x:Key="Text_EnableTun">启用 TUN</sys:String>
+    <sys:String x:Key="Text_Apply">应用</sys:String>
+    <sys:String x:Key="Text_Reload">重新加载</sys:String>
+    <sys:String x:Key="Text_Running">运行中</sys:String>
+    <sys:String x:Key="Text_Stopped">已停止</sys:String>
+    <sys:String x:Key="Text_StartCore">启动核心</sys:String>
+    <sys:String x:Key="Text_StopCore">停止核心</sys:String>
+
+    <sys:String x:Key="Text_Add">添加</sys:String>
+    <sys:String x:Key="Text_Update">更新</sys:String>
+    <sys:String x:Key="Text_Refresh">刷新</sys:String>
+    <sys:String x:Key="Text_Edit">编辑</sys:String>
+    <sys:String x:Key="Text_Save">保存</sys:String>
+    <sys:String x:Key="Text_Remove">删除</sys:String>
+    <sys:String x:Key="Text_Name">名称</sys:String>
+    <sys:String x:Key="Text_URL">链接</sys:String>
+    <sys:String x:Key="Text_Enabled">启用</sys:String>
+    <sys:String x:Key="Text_IntervalMinutes">间隔（分钟）</sys:String>
+    <sys:String x:Key="Text_LastUpdated">上次更新</sys:String>
+
+    <sys:String x:Key="Text_Select">选择</sys:String>
+    <sys:String x:Key="Text_TcpTest">TCP 测试</sys:String>
+    <sys:String x:Key="Text_ConnectTest">连接测试</sys:String>
+    <sys:String x:Key="Text_TcpTestAll">TCP 测试全部</sys:String>
+    <sys:String x:Key="Text_ConnectTestAll">连接测试全部</sys:String>
+    <sys:String x:Key="Text_Type">类型</sys:String>
+    <sys:String x:Key="Text_Port">端口</sys:String>
+    <sys:String x:Key="Text_LatencyMs">延迟（ms）</sys:String>
+
+    <sys:String x:Key="Text_RoutingMode">分流模式</sys:String>
+    <sys:String x:Key="Text_RulesHint">每行一条规则，例如：DOMAIN-SUFFIX,google.com,Auto</sys:String>
+    <sys:String x:Key="Text_SaveRules">保存规则</sys:String>
+
+    <sys:String x:Key="Text_Clear">清空</sys:String>
+    <sys:String x:Key="Text_Time">时间</sys:String>
+    <sys:String x:Key="Text_Level">级别</sys:String>
+    <sys:String x:Key="Text_Message">内容</sys:String>
+
+    <sys:String x:Key="Text_Active">活动</sys:String>
+    <sys:String x:Key="Text_Up">上传</sys:String>
+    <sys:String x:Key="Text_Down">下载</sys:String>
+    <sys:String x:Key="Text_CloseAll">全部关闭</sys:String>
+    <sys:String x:Key="Text_SearchPlaceholder">搜索主机、规则、节点或进程</sys:String>
+    <sys:String x:Key="Text_Pause">暂停</sys:String>
+    <sys:String x:Key="Text_Resume">继续</sys:String>
+
+    <sys:String x:Key="Text_Core">核心</sys:String>
+    <sys:String x:Key="Text_CorePath">核心路径</sys:String>
+    <sys:String x:Key="Text_ConfigPath">配置路径</sys:String>
+    <sys:String x:Key="Text_ApiSecret">API 密钥</sys:String>
+    <sys:String x:Key="Text_SelectionGroup">选择组</sys:String>
+    <sys:String x:Key="Text_Features">功能</sys:String>
+    <sys:String x:Key="Text_AllowLan">允许局域网</sys:String>
+    <sys:String x:Key="Text_Experience">体验</sys:String>
+    <sys:String x:Key="Text_Appearance">外观</sys:String>
+    <sys:String x:Key="Text_SoftwareSettings">软件设置</sys:String>
+    <sys:String x:Key="Text_LogLevel">日志等级</sys:String>
+    <sys:String x:Key="Text_Theme">主题</sys:String>
+    <sys:String x:Key="Text_FontSize">字体大小</sys:String>
+    <sys:String x:Key="Text_Language">语言</sys:String>
+    <sys:String x:Key="Text_PaneAcrylicOpacity">侧栏亚克力透明度</sys:String>
+    <sys:String x:Key="Text_ContentAcrylicOpacity">内容亚克力透明度</sys:String>
+    <sys:String x:Key="Text_AutoStart">开机自启动</sys:String>
+    <sys:String x:Key="Text_AutoUpdate">自动更新</sys:String>
+    <sys:String x:Key="Text_UpdateFeedUrl">更新源地址</sys:String>
+    <sys:String x:Key="Text_NetworkSettings">网络设置</sys:String>
+    <sys:String x:Key="Text_NetworkControl">网络控制</sys:String>
+    <sys:String x:Key="Text_BlockedWebsites">网站屏蔽</sys:String>
+    <sys:String x:Key="Text_SpeedLimit">限速（KB/s）</sys:String>
+    <sys:String x:Key="Text_DownloadLimit">下载</sys:String>
+    <sys:String x:Key="Text_UploadLimit">上传</sys:String>
+    <sys:String x:Key="Text_LimitHint">0 表示不限速</sys:String>
+
+    <sys:String x:Key="Text_AddSubscription">添加订阅</sys:String>
+    <sys:String x:Key="Text_EditSubscription">编辑订阅</sys:String>
+    <sys:String x:Key="Text_CreateSubscription">创建新的订阅</sys:String>
+    <sys:String x:Key="Text_SupportsFormats">支持 Clash YAML、SS/SSR/Trojan/VLESS/VMess 链接或 Base64 列表。</sys:String>
+    <sys:String x:Key="Text_Enable">启用</sys:String>
+    <sys:String x:Key="Text_Cancel">取消</sys:String>
+    <sys:String x:Key="Text_Exit">退出</sys:String>
+    <sys:String x:Key="Text_Open">打开</sys:String>
+
+    <sys:String x:Key="Text_EditFile">编辑文件</sys:String>
+    <sys:String x:Key="Text_EditSubscriptionFile">编辑订阅文件</sys:String>
+    <sys:String x:Key="Text_SubscriptionFileHint">编辑订阅原始内容，保存后将更新节点与策略组。</sys:String>
+</ResourceDictionary>

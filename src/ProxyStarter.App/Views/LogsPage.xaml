@@ -1,0 +1,89 @@
+﻿<Page x:Class="ProxyStarter.App.Views.LogsPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      mc:Ignorable="d">
+    <Page.Resources>
+        <Style x:Key="LogLevelTagStyle" TargetType="Border">
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+    </Page.Resources>
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16">
+            <TextBlock Text="{DynamicResource Text_Logs}"
+                       FontSize="28"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,16" />
+
+            <ui:Card Padding="16">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <ui:Button Content="{DynamicResource Text_Clear}"
+                                   Command="{Binding ClearCommand}">
+                            <ui:Button.Icon>
+                                <ui:SymbolIcon Symbol="Delete24" />
+                            </ui:Button.Icon>
+                        </ui:Button>
+                    </StackPanel>
+
+                    <Border Background="{DynamicResource LayerOnAcrylicFillColorDefaultBrush}"
+                            BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Padding="6">
+                        <ui:ListView ItemsSource="{Binding Entries}"
+                                     MinHeight="280"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     VerticalContentAlignment="Top">
+                            <ui:ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="Padding" Value="4,6" />
+                                </Style>
+                            </ui:ListView.ItemContainerStyle>
+                            <ui:ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
+                                            BorderThickness="0,0,0,1"
+                                            Padding="0,6">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="170" />
+                                                <ColumnDefinition Width="90" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <TextBlock Text="{Binding Timestamp}"
+                                                       Opacity="0.7"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Margin="0,0,12,0" />
+
+                                            <Border Grid.Column="1"
+                                                    Style="{StaticResource LogLevelTagStyle}">
+                                                <TextBlock Text="{Binding Level}" />
+                                            </Border>
+
+                                            <TextBlock Grid.Column="2"
+                                                       Text="{Binding Message}"
+                                                       TextWrapping="NoWrap"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ui:ListView.ItemTemplate>
+                        </ui:ListView>
+                    </Border>
+                </StackPanel>
+            </ui:Card>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

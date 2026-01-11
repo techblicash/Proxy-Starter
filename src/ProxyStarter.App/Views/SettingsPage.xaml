@@ -1,0 +1,155 @@
+﻿<Page x:Class="ProxyStarter.App.Views.SettingsPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      mc:Ignorable="d">
+    <Grid Margin="16"
+          MinHeight="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=ui:NavigationView}}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="{DynamicResource Text_Settings}"
+                   FontSize="28"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,16" />
+
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      PanningMode="VerticalOnly">
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                    <ui:Card Padding="16" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource Text_Core}" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="{DynamicResource Text_CorePath}" Opacity="0.7" Margin="0,12,0,0" />
+                            <TextBox Text="{Binding CorePath}" />
+                            <TextBlock Text="{DynamicResource Text_ConfigPath}" Opacity="0.7" Margin="0,12,0,0" />
+                            <TextBox Text="{Binding ConfigPath}" />
+                            <TextBlock Text="{DynamicResource Text_ApiSecret}" Opacity="0.7" Margin="0,12,0,0" />
+                            <TextBox Text="{Binding ApiSecret}" Width="200" />
+                        </StackPanel>
+                    </ui:Card>
+
+                    <ui:Card Padding="16">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource Text_NetworkSettings}" FontSize="16" FontWeight="SemiBold" />
+                            <CheckBox Content="{DynamicResource Text_AllowLan}"
+                                      IsChecked="{Binding AllowLan}"
+                                      Margin="0,12,0,0" />
+                            <TextBlock Text="{DynamicResource Text_SpeedLimit}" Opacity="0.7" Margin="0,12,0,0" />
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <StackPanel Margin="0,0,12,0">
+                                    <TextBlock Text="{DynamicResource Text_DownloadLimit}" Opacity="0.7" />
+                                    <TextBox Text="{Binding DownloadLimitKbps}" Width="120" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="{DynamicResource Text_UploadLimit}" Opacity="0.7" />
+                                    <TextBox Text="{Binding UploadLimitKbps}" Width="120" />
+                                </StackPanel>
+                            </StackPanel>
+                            <TextBlock Text="{DynamicResource Text_LimitHint}" Opacity="0.6" Margin="0,8,0,0" />
+
+                            <TextBlock Text="{DynamicResource Text_BlockedWebsites}" Opacity="0.7" Margin="0,12,0,0" />
+                            <TextBox Text="{Binding BlockedSites}"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     MinHeight="120" />
+                        </StackPanel>
+                    </ui:Card>
+                </StackPanel>
+
+                <StackPanel Grid.Column="1">
+                    <ui:Card Padding="16" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource Text_Appearance}" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="{DynamicResource Text_Theme}" Opacity="0.7" Margin="0,12,0,0" />
+                            <ComboBox ItemsSource="{Binding Themes}"
+                                      SelectedItem="{Binding Theme}"
+                                      Width="160"
+                                      Style="{StaticResource CrispComboBoxStyle}" />
+                            <TextBlock Text="{DynamicResource Text_FontSize}" Opacity="0.7" Margin="0,12,0,0" />
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <Slider Minimum="10"
+                                        Maximum="24"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="True"
+                                        SmallChange="1"
+                                        LargeChange="2"
+                                        Value="{Binding FontSize}"
+                                        Width="240" />
+                                <TextBlock Text="{Binding FontSize}"
+                                           Width="40"
+                                           Margin="12,0,0,0"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Text="{DynamicResource Text_Language}" Opacity="0.7" Margin="0,12,0,0" />
+                            <ComboBox ItemsSource="{Binding Languages}"
+                                      SelectedItem="{Binding Language}"
+                                      Width="160"
+                                      Style="{StaticResource CrispComboBoxStyle}" />
+                            <TextBlock Text="{DynamicResource Text_PaneAcrylicOpacity}" Opacity="0.7" Margin="0,12,0,0" />
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <Slider Minimum="0"
+                                        Maximum="255"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="True"
+                                        SmallChange="1"
+                                        LargeChange="16"
+                                        Value="{Binding PaneAcrylicOpacity}"
+                                        Width="240" />
+                                <TextBlock Text="{Binding PaneAcrylicOpacity}"
+                                           Width="40"
+                                           Margin="12,0,0,0"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Text="{DynamicResource Text_ContentAcrylicOpacity}" Opacity="0.7" Margin="0,12,0,0" />
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <Slider Minimum="0"
+                                        Maximum="255"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="True"
+                                        SmallChange="1"
+                                        LargeChange="16"
+                                        Value="{Binding ContentAcrylicOpacity}"
+                                        Width="240" />
+                                <TextBlock Text="{Binding ContentAcrylicOpacity}"
+                                           Width="40"
+                                           Margin="12,0,0,0"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                        </StackPanel>
+                    </ui:Card>
+
+                    <ui:Card Padding="16" Margin="0,0,0,16">
+                        <StackPanel>
+                            <TextBlock Text="{DynamicResource Text_SoftwareSettings}" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="{DynamicResource Text_LogLevel}" Opacity="0.7" Margin="0,12,0,0" />
+                            <ComboBox ItemsSource="{Binding LogLevels}"
+                                      SelectedItem="{Binding LogLevel}"
+                                      Width="160"
+                                      Style="{StaticResource CrispComboBoxStyle}" />
+                            <CheckBox Content="{DynamicResource Text_AutoStart}" IsChecked="{Binding AutoStart}" Margin="0,12,0,0" />
+                            <CheckBox Content="{DynamicResource Text_AutoUpdate}" IsChecked="{Binding AutoUpdate}" />
+                            <TextBlock Text="{DynamicResource Text_UpdateFeedUrl}" Opacity="0.7" Margin="0,12,0,0" />
+                            <TextBox Text="{Binding UpdateFeedUrl}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                <ui:Button Content="{DynamicResource Text_Save}" Command="{Binding SaveCommand}" Margin="0,0,8,0" />
+                                <ui:Button Content="{DynamicResource Text_Reload}" Command="{Binding ReloadCommand}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </ui:Card>
+                </StackPanel>
+            </Grid>
+        </ScrollViewer>
+    </Grid>
+</Page>

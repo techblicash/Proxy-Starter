@@ -1,0 +1,165 @@
+<Page x:Class="ProxyStarter.App.Views.ConnectionsPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      mc:Ignorable="d">
+    <Page.Resources>
+        <Style x:Key="ConnectionTagStyle" TargetType="Border">
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="Margin" Value="0,0,6,6" />
+            <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding}" Value="">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Page.Resources>
+
+    <Grid Margin="16"
+          MinHeight="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=ui:NavigationView}}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="{DynamicResource Text_Connections}"
+                   FontSize="28"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,16" />
+
+        <ui:Card Grid.Row="1"
+                 Padding="16"
+                 HorizontalAlignment="Stretch"
+                 VerticalAlignment="Stretch"
+                 HorizontalContentAlignment="Stretch"
+                 VerticalContentAlignment="Stretch">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" Margin="0,0,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="{DynamicResource Text_Active}"
+                                   Opacity="0.7"
+                                   Margin="0,0,8,0" />
+                        <TextBlock Text="{Binding ConnectionCount}"
+                                   FontWeight="SemiBold" />
+                    </StackPanel>
+
+                    <ui:TextBox Grid.Column="1"
+                                Height="32"
+                                Margin="12,0"
+                                VerticalContentAlignment="Center"
+                                Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                PlaceholderText="{DynamicResource Text_SearchPlaceholder}" />
+
+                    <StackPanel Grid.Column="2"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal"
+                                    VerticalAlignment="Center"
+                                    Margin="0,0,12,0">
+                            <TextBlock Text="{DynamicResource Text_TotalLabel}"
+                                       Opacity="0.7"
+                                       Margin="0,0,6,0" />
+                            <TextBlock Text="{DynamicResource Text_Up}"
+                                       Opacity="0.7"
+                                       Margin="0,0,4,0" />
+                            <TextBlock Text="{Binding UploadTotal}" Margin="0,0,12,0" />
+                            <TextBlock Text="{DynamicResource Text_Down}"
+                                       Opacity="0.7"
+                                       Margin="0,0,4,0" />
+                            <TextBlock Text="{Binding DownloadTotal}" />
+                        </StackPanel>
+                        <ui:Button Content="{Binding PauseLabel}"
+                                   Command="{Binding TogglePauseCommand}"
+                                   Margin="0,0,8,0" />
+                        <ui:Button Content="{DynamicResource Text_CloseAll}"
+                                   Appearance="Danger"
+                                   Command="{Binding CloseAllCommand}" />
+                    </StackPanel>
+                </Grid>
+
+                <Border Grid.Row="1"
+                        Background="{DynamicResource LayerOnAcrylicFillColorDefaultBrush}"
+                        BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Padding="6">
+                    <ui:ListView ItemsSource="{Binding ConnectionsView}"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 VerticalContentAlignment="Top">
+                        <ui:ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Padding="12"
+                                        Margin="0,0,0,8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Target}"
+                                                       FontSize="16"
+                                                       FontWeight="SemiBold" />
+                                            <WrapPanel Margin="0,8,0,0">
+                                                <Border Style="{StaticResource ConnectionTagStyle}" DataContext="{Binding Network}">
+                                                    <TextBlock Text="{Binding}" />
+                                                </Border>
+                                                <Border Style="{StaticResource ConnectionTagStyle}" DataContext="{Binding Type}">
+                                                    <TextBlock Text="{Binding}" />
+                                                </Border>
+                                                <Border Style="{StaticResource ConnectionTagStyle}" DataContext="{Binding Rule}">
+                                                    <TextBlock Text="{Binding}" />
+                                                </Border>
+                                                <Border Style="{StaticResource ConnectionTagStyle}" DataContext="{Binding Proxy}">
+                                                    <TextBlock Text="{Binding}" />
+                                                </Border>
+                                                <Border Style="{StaticResource ConnectionTagStyle}" DataContext="{Binding Process}">
+                                                    <TextBlock Text="{Binding}" />
+                                                </Border>
+                                                <Border Style="{StaticResource ConnectionTagStyle}" DataContext="{Binding Age}">
+                                                    <TextBlock Text="{Binding}" />
+                                                </Border>
+                                            </WrapPanel>
+                                        </StackPanel>
+
+                                        <ui:Button Grid.Column="1"
+                                                   Width="32"
+                                                   Height="32"
+                                                   Appearance="Secondary"
+                                                   Command="{Binding DataContext.CloseConnectionCommand, RelativeSource={RelativeSource AncestorType=ui:ListView}}"
+                                                   CommandParameter="{Binding}">
+                                            <ui:SymbolIcon Symbol="Dismiss24" />
+                                        </ui:Button>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ui:ListView.ItemTemplate>
+                    </ui:ListView>
+                </Border>
+            </Grid>
+        </ui:Card>
+    </Grid>
+</Page>
