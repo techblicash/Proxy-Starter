@@ -4,7 +4,8 @@
       xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
       xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-      mc:Ignorable="d">
+      mc:Ignorable="d"
+      KeepAlive="True">
     <Page.Resources>
         <Style x:Key="ConnectionTagStyle" TargetType="Border">
             <Setter Property="CornerRadius" Value="6" />
@@ -104,7 +105,17 @@
                                  Background="Transparent"
                                  BorderThickness="0"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                 ScrollViewer.CanContentScroll="True"
+                                 VirtualizingPanel.IsVirtualizing="True"
+                                 VirtualizingPanel.VirtualizationMode="Recycling"
+                                 VirtualizingStackPanel.ScrollUnit="Pixel"
                                  VerticalContentAlignment="Top">
+                        <ui:ListView.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <VirtualizingStackPanel />
+                            </ItemsPanelTemplate>
+                        </ui:ListView.ItemsPanel>
                         <ui:ListView.ItemTemplate>
                             <DataTemplate>
                                 <Border Background="{DynamicResource ControlFillColorDefaultBrush}"

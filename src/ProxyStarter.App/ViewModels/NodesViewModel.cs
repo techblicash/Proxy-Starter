@@ -13,18 +13,21 @@ using ProxyStarter.App.Services;
 
 namespace ProxyStarter.App.ViewModels;
 
-public partial class NodesViewModel : ObservableObject
+public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
 {
     private readonly ProxyCatalogStore _proxyCatalogStore;
+    private readonly SubscriptionStore _subscriptionStore;
     private readonly MihomoApiClient _apiClient;
     private readonly LatencyTestService _latencyTestService;
     private readonly AppSettingsStore _settingsStore;
     private readonly IDialogService _dialogService;
     private readonly DispatcherTimer _activeTimer;
+    private bool _isActive;
     private readonly Dictionary<string, List<ProxyNode>> _nodeLookup = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<ProxyNode>> _displayLookup = new(StringComparer.OrdinalIgnoreCase);
     private List<ProxyNode> _allNodes = new();
     private IReadOnlyList<ProxyNode> _currentDisplayNodes = Array.Empty<ProxyNode>();
+    private Dictionary<string, string> _sourceNames = new(StringComparer.OrdinalIgnoreCase);
     private int _groupsLoadInProgress;
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _rowsCts;
@@ -45,25 +48,32 @@ public partial class NodesViewModel : ObservableObject
     [ObservableProperty]
     private int _cardsPerRow = 2;
 
+    [ObservableProperty]
+    private bool _useSubscriptionPolicyGroups = true;
+
     public ObservableRangeCollection<ProxyNode> Nodes { get; } = new();
     public ObservableRangeCollection<NodeCardRow> NodeRows { get; } = new();
     public ObservableRangeCollection<string> Groups { get; } = new();
+    public bool ShowSelectionGroup => UseSubscriptionPolicyGroups;
 
     public double SavedScrollOffset { get; set; }
 
     public NodesViewModel(
         ProxyCatalogStore proxyCatalogStore,
+        SubscriptionStore subscriptionStore,
         MihomoApiClient apiClient,
         LatencyTestService latencyTestService,
         AppSettingsStore settingsStore,
         IDialogService dialogService)
     {
         _proxyCatalogStore = proxyCatalogStore;
+        _subscriptionStore = subscriptionStore;
         _apiClient = apiClient;
         _latencyTestService = latencyTestService;
         _settingsStore = settingsStore;
         _dialogService = dialogService;
         _selectedGroup = settingsStore.Settings.SelectionGroup;
+        _useSubscriptionPolicyGroups = settingsStore.Settings.UseSubscriptionPolicyGroups;
 
         _ = LoadFromCatalogAsync();
 
@@ -72,9 +82,7 @@ public partial class NodesViewModel : ObservableObject
             Interval = TimeSpan.FromSeconds(3)
         };
         _activeTimer.Tick += async (_, _) => await UpdateActiveNodeAsync();
-        _activeTimer.Start();
-
-        _ = UpdateActiveNodeAsync();
+        // Timer runs only while the Nodes page is visible.
     }
 
     partial void OnCardsPerRowChanged(int value)
@@ -87,8 +95,18 @@ public partial class NodesViewModel : ObservableObject
         RefreshRowsFromCurrent();
     }
 
+    partial void OnUseSubscriptionPolicyGroupsChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowSelectionGroup));
+    }
+
     partial void OnSelectedGroupChanged(string value)
     {
+        if (!UseSubscriptionPolicyGroups)
+        {
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(value))
         {
             return;
@@ -96,8 +114,11 @@ public partial class NodesViewModel : ObservableObject
 
         QueueSelectionGroupSave(value);
 
-        _ = RefreshNodeRowsAsync();
-        _ = UpdateActiveNodeAsync();
+        if (_isActive)
+        {
+            _ = RefreshNodeRowsAsync();
+            _ = UpdateActiveNodeAsync();
+        }
     }
 
     [RelayCommand]
@@ -272,9 +293,24 @@ public partial class NodesViewModel : ObservableObject
         _loadCts = cts;
 
         List<ProxyNode> nodes;
+        Dictionary<string, string> sourceNames;
         try
         {
-            nodes = await Task.Run(() => _proxyCatalogStore.LoadNodes().ToList(), cts.Token);
+            var catalog = await Task.Run(() =>
+            {
+                var loadedNodes = _proxyCatalogStore.LoadNodes().ToList();
+                var names = _subscriptionStore.Load()
+                    .Where(profile => !string.IsNullOrWhiteSpace(profile.Id))
+                    .GroupBy(profile => profile.Id, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => group.First().Name,
+                        StringComparer.OrdinalIgnoreCase);
+
+                return (Nodes: loadedNodes, SourceNames: names);
+            }, cts.Token);
+            nodes = catalog.Nodes;
+            sourceNames = catalog.SourceNames;
         }
         catch (OperationCanceledException)
         {
@@ -286,23 +322,30 @@ public partial class NodesViewModel : ObservableObject
             return;
         }
 
-        void Apply()
+        _allNodes = nodes;
+        _sourceNames = sourceNames;
+        RebuildNodeLookup(nodes);
+
+        void ApplyUi()
         {
-            _allNodes = nodes;
+            if (cts.IsCancellationRequested || !ReferenceEquals(_loadCts, cts))
+            {
+                return;
+            }
+
             Nodes.ReplaceRange(nodes);
-            RebuildNodeLookup(nodes);
             LoadGroupsFromCatalog();
         }
 
         if (Application.Current is null)
         {
-            Apply();
+            ApplyUi();
         }
         else
         {
             try
             {
-                Application.Current.Dispatcher.Invoke(Apply);
+                _ = Application.Current.Dispatcher.BeginInvoke((Action)ApplyUi, DispatcherPriority.Background);
             }
             catch
             {
@@ -315,6 +358,19 @@ public partial class NodesViewModel : ObservableObject
 
     private void LoadGroupsFromCatalog()
     {
+        SyncPolicyGroupModeFromSettings();
+
+        if (!UseSubscriptionPolicyGroups)
+        {
+            var defaultGroup = RoutingDefaults.FlatModeSelectionGroup;
+            Groups.ReplaceRange(new[] { defaultGroup });
+            if (!string.Equals(SelectedGroup, defaultGroup, StringComparison.Ordinal))
+            {
+                SelectedGroup = defaultGroup;
+            }
+            return;
+        }
+
         static string? GetGroupNameValue(Dictionary<string, object> group)
         {
             foreach (var entry in group)
@@ -343,11 +399,19 @@ public partial class NodesViewModel : ObservableObject
 
         Groups.ReplaceRange(groupNames);
 
-        _ = LoadGroupsFromCoreAsync();
+        if (_isActive)
+        {
+            _ = LoadGroupsFromCoreAsync();
+        }
     }
 
     private async Task LoadGroupsFromCoreAsync()
     {
+        if (!UseSubscriptionPolicyGroups)
+        {
+            return;
+        }
+
         if (Interlocked.Exchange(ref _groupsLoadInProgress, 1) == 1)
         {
             return;
@@ -375,7 +439,18 @@ public partial class NodesViewModel : ObservableObject
                 groupNames.Insert(0, SelectedGroup);
             }
 
-            void Apply() => Groups.ReplaceRange(groupNames);
+            if (!_isActive)
+            {
+                return;
+            }
+
+            void Apply()
+            {
+                if (_isActive)
+                {
+                    Groups.ReplaceRange(groupNames);
+                }
+            }
 
             if (Application.Current is null)
             {
@@ -465,11 +540,21 @@ public partial class NodesViewModel : ObservableObject
 
     private string GetGroupName()
     {
+        if (!UseSubscriptionPolicyGroups)
+        {
+            return RoutingDefaults.FlatModeSelectionGroup;
+        }
+
         return string.IsNullOrWhiteSpace(SelectedGroup) ? _settingsStore.Settings.SelectionGroup : SelectedGroup;
     }
 
     private void QueueSelectionGroupSave(string selectionGroup)
     {
+        if (!UseSubscriptionPolicyGroups)
+        {
+            return;
+        }
+
         if (string.Equals(_settingsStore.Settings.SelectionGroup, selectionGroup, StringComparison.Ordinal))
         {
             return;
@@ -513,6 +598,11 @@ public partial class NodesViewModel : ObservableObject
         string groupName,
         CancellationToken cancellationToken)
     {
+        if (!UseSubscriptionPolicyGroups)
+        {
+            return nodes.ToList();
+        }
+
         if (nodes.Count == 0 || string.IsNullOrWhiteSpace(groupName))
         {
             return nodes.ToList();
@@ -566,23 +656,73 @@ public partial class NodesViewModel : ObservableObject
         return nodes.ToList();
     }
 
-    private static List<NodeCardRow> BuildRows(IReadOnlyList<ProxyNode> nodes, int cardsPerRow)
+    private List<NodeCardRow> BuildRows(IReadOnlyList<ProxyNode> nodes, int cardsPerRow)
     {
         cardsPerRow = Math.Max(1, cardsPerRow);
         var rows = new List<NodeCardRow>((nodes.Count + cardsPerRow - 1) / cardsPerRow);
-        for (var i = 0; i < nodes.Count; i += cardsPerRow)
+        var sourceGroups = BuildSourceGroups(nodes);
+        var showHeaders = sourceGroups.Count > 1
+                          || sourceGroups.Any(group => !string.IsNullOrWhiteSpace(group.SourceId));
+
+        foreach (var group in sourceGroups)
         {
-            var count = Math.Min(cardsPerRow, nodes.Count - i);
-            var items = new List<ProxyNode>(count);
-            for (var j = 0; j < count; j++)
+            if (showHeaders)
             {
-                items.Add(nodes[i + j]);
+                rows.Add(NodeCardRow.Section(GetSourceHeader(group.SourceId, group.Nodes.Count), group.Nodes.Count));
             }
 
-            rows.Add(new NodeCardRow(items));
+            for (var i = 0; i < group.Nodes.Count; i += cardsPerRow)
+            {
+                var count = Math.Min(cardsPerRow, group.Nodes.Count - i);
+                var items = new List<ProxyNode>(count);
+                for (var j = 0; j < count; j++)
+                {
+                    items.Add(group.Nodes[i + j]);
+                }
+
+                rows.Add(NodeCardRow.Cards(items));
+            }
         }
 
         return rows;
+    }
+
+    private List<(string SourceId, List<ProxyNode> Nodes)> BuildSourceGroups(IReadOnlyList<ProxyNode> nodes)
+    {
+        var order = new List<string>();
+        var groups = new Dictionary<string, List<ProxyNode>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var node in nodes)
+        {
+            var key = string.IsNullOrWhiteSpace(node.SourceId) ? string.Empty : node.SourceId;
+            if (!groups.TryGetValue(key, out var list))
+            {
+                list = new List<ProxyNode>();
+                groups[key] = list;
+                order.Add(key);
+            }
+
+            list.Add(node);
+        }
+
+        return order
+            .Select(sourceId => (SourceId: sourceId, Nodes: groups[sourceId]))
+            .ToList();
+    }
+
+    private string GetSourceHeader(string sourceId, int count)
+    {
+        var name = string.Empty;
+        if (!string.IsNullOrWhiteSpace(sourceId))
+        {
+            _sourceNames.TryGetValue(sourceId, out name);
+        }
+
+        name = string.IsNullOrWhiteSpace(name)
+            ? string.IsNullOrWhiteSpace(sourceId) ? "Built-in" : sourceId
+            : name;
+
+        return $"{name} ({count})";
     }
 
     private void RebuildNodeLookup(IEnumerable<ProxyNode> nodes)
@@ -620,6 +760,11 @@ public partial class NodesViewModel : ObservableObject
 
     private async Task UpdateActiveNodeAsync()
     {
+        if (!_isActive)
+        {
+            return;
+        }
+
         if (Interlocked.Exchange(ref _activeUpdateInProgress, 1) == 1)
         {
             return;
@@ -685,19 +830,7 @@ public partial class NodesViewModel : ObservableObject
                 SetActive(activeNode, true);
             }
 
-            if (Application.Current is null)
-            {
-                Apply();
-                return;
-            }
-
-            try
-            {
-                Application.Current.Dispatcher.Invoke(Apply);
-            }
-            catch
-            {
-            }
+            Dispatch(Apply);
         }
         finally
         {
@@ -705,9 +838,55 @@ public partial class NodesViewModel : ObservableObject
         }
     }
 
+    public void OnPageActivated()
+    {
+        if (_isActive)
+        {
+            return;
+        }
+
+        SyncPolicyGroupModeFromSettings();
+        LoadGroupsFromCatalog();
+        _ = RefreshNodeRowsAsync();
+
+        _isActive = true;
+        _activeTimer.Start();
+        _ = UpdateActiveNodeAsync();
+        _ = LoadGroupsFromCoreAsync();
+    }
+
+    public void OnPageDeactivated()
+    {
+        _isActive = false;
+        _activeTimer.Stop();
+
+        try
+        {
+            _rowsCts?.Cancel();
+        }
+        catch
+        {
+        }
+    }
+
+    private static void Dispatch(Action action)
+    {
+        if (Application.Current is null)
+        {
+            action();
+            return;
+        }
+
+        Application.Current.Dispatcher.BeginInvoke(action, DispatcherPriority.Background);
+    }
+
     private async Task TestAllAsync(Func<ProxyNode, Task<int>> test)
     {
-        if (IsTestingAll || Nodes.Count == 0)
+        var nodesToTest = _currentDisplayNodes
+            .Where(node => !string.IsNullOrWhiteSpace(node.Address) && node.Port > 0)
+            .ToList();
+
+        if (IsTestingAll || nodesToTest.Count == 0)
         {
             return;
         }
@@ -716,7 +895,7 @@ public partial class NodesViewModel : ObservableObject
         var semaphore = new SemaphoreSlim(4);
         try
         {
-            var tasks = Nodes.Select(async node =>
+            var tasks = nodesToTest.Select(async node =>
             {
                 await semaphore.WaitAsync();
                 try
@@ -756,5 +935,25 @@ public partial class NodesViewModel : ObservableObject
         }
 
         Application.Current.Dispatcher.BeginInvoke(() => node.LatencyMs = latency, DispatcherPriority.Background);
+    }
+
+    private void SyncPolicyGroupModeFromSettings()
+    {
+        var useSubscriptionPolicyGroups = _settingsStore.Settings.UseSubscriptionPolicyGroups;
+        if (UseSubscriptionPolicyGroups != useSubscriptionPolicyGroups)
+        {
+            UseSubscriptionPolicyGroups = useSubscriptionPolicyGroups;
+        }
+    }
+
+    public ProxyNode? GetActiveNode()
+    {
+        var active = _currentDisplayNodes.FirstOrDefault(node => node.IsActive);
+        if (active is not null)
+        {
+            return active;
+        }
+
+        return _allNodes.FirstOrDefault(node => node.IsActive);
     }
 }

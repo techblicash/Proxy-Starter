@@ -104,10 +104,11 @@ public sealed class QosPolicyService
 
     private static async Task<QosApplyResult> RunPowerShellAsync(string script, CancellationToken cancellationToken)
     {
+        var encodedScript = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
         var psi = new ProcessStartInfo
         {
-            FileName = "powershell",
-            Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"{script}\"",
+            FileName = "powershell.exe",
+            Arguments = $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encodedScript}",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

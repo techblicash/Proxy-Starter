@@ -1,6 +1,8 @@
 ﻿using System;
+using System.IO;
+using System.Net.Http;
+using System.Net.Sockets;
 using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -11,7 +13,11 @@ namespace ProxyStarter.App.Services;
 public sealed class TrafficMonitorService : IDisposable
 {
     private readonly AppSettingsStore _settingsStore;
+    private readonly object _sync = new();
     private CancellationTokenSource? _cts;
+    private Task? _runTask;
+    private long _lastEmitAtMs;
+    private const int MinEmitIntervalMs = 200;
 
     public event EventHandler<TrafficSnapshot>? TrafficUpdated;
 
@@ -22,19 +28,30 @@ public sealed class TrafficMonitorService : IDisposable
 
     public void Start()
     {
-        if (_cts is not null)
+        lock (_sync)
         {
-            return;
-        }
+            if (_cts is not null)
+            {
+                return;
+            }
 
-        _cts = new CancellationTokenSource();
-        _ = RunAsync(_cts.Token);
+            var cts = new CancellationTokenSource();
+            _cts = cts;
+            _runTask = RunAsync(cts.Token).ContinueWith(
+                _ => cts.Dispose(),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
     }
 
     public void Stop()
     {
-        _cts?.Cancel();
-        _cts = null;
+        lock (_sync)
+        {
+            _cts?.Cancel();
+            _cts = null;
+        }
     }
 
     public void Dispose()
@@ -49,7 +66,9 @@ public sealed class TrafficMonitorService : IDisposable
             try
             {
                 using var socket = new ClientWebSocket();
-                var uri = new Uri($"ws://127.0.0.1:{_settingsStore.Settings.ApiPort}/traffic");
+                var settings = _settingsStore.Settings;
+                ApplyAuthorization(socket, settings.ApiSecret);
+                var uri = new Uri($"ws://127.0.0.1:{settings.ApiPort}/traffic");
                 await socket.ConnectAsync(uri, cancellationToken);
 
                 var buffer = new byte[4096];
@@ -61,15 +80,31 @@ public sealed class TrafficMonitorService : IDisposable
                         break;
                     }
 
-                    var payload = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    if (TryParseTraffic(payload, out var up, out var down))
+                    // Mihomo emits traffic very frequently; throttle to reduce CPU/GPU/UI churn.
+                    var nowMs = Environment.TickCount64;
+                    if (nowMs - _lastEmitAtMs < MinEmitIntervalMs)
+                    {
+                        continue;
+                    }
+
+                    _lastEmitAtMs = nowMs;
+
+                    if (TryParseTraffic(buffer.AsMemory(0, result.Count), out var up, out var down))
                     {
                         TrafficUpdated?.Invoke(this, new TrafficSnapshot(up, down, 0, 0));
                     }
                 }
             }
-            catch
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                return;
+            }
+            catch (Exception ex) when (IsExpectedWebSocketFailure(ex))
+            {
+            }
+            catch (Exception ex)
+            {
+                CrashLogger.Log(ex, "TrafficMonitorService: WebSocket");
             }
 
             try
@@ -83,7 +118,32 @@ public sealed class TrafficMonitorService : IDisposable
         }
     }
 
-    private static bool TryParseTraffic(string payload, out long up, out long down)
+    private static void ApplyAuthorization(ClientWebSocket socket, string? secret)
+    {
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            return;
+        }
+
+        try
+        {
+            socket.Options.SetRequestHeader("Authorization", $"Bearer {secret}");
+        }
+        catch
+        {
+        }
+    }
+
+    private static bool IsExpectedWebSocketFailure(Exception exception)
+    {
+        return exception is WebSocketException
+            or HttpRequestException
+            or IOException
+            or SocketException
+            or TaskCanceledException;
+    }
+
+    private static bool TryParseTraffic(ReadOnlyMemory<byte> payload, out long up, out long down)
     {
         up = 0;
         down = 0;

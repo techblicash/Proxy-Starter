@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Net.Http;
 using System.IO;
+using System.Linq;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -29,50 +30,61 @@ public sealed class MihomoApiClient
 
     public async Task<MihomoProxiesSnapshot?> GetProxiesAsync(CancellationToken cancellationToken = default)
     {
-        var cached = _proxiesCache;
-        if (cached is not null && DateTimeOffset.UtcNow - _proxiesCacheAt < ProxiesCacheTtl)
-        {
-            return cached;
-        }
-
-        await _proxiesCacheGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            cached = _proxiesCache;
+            var cached = _proxiesCache;
             if (cached is not null && DateTimeOffset.UtcNow - _proxiesCacheAt < ProxiesCacheTtl)
             {
                 return cached;
             }
 
-            using var client = CreateClient();
-            using var response = await client.GetAsync("proxies", cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            await _proxiesCacheGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                return null;
-            }
+                cached = _proxiesCache;
+                if (cached is not null && DateTimeOffset.UtcNow - _proxiesCacheAt < ProxiesCacheTtl)
+                {
+                    return cached;
+                }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-            if (!document.RootElement.TryGetProperty("proxies", out var proxiesElement))
+                using var client = CreateClient();
+                using var response = await client.GetAsync("proxies", cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return null;
+                }
+
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+                if (!document.RootElement.TryGetProperty("proxies", out var proxiesElement))
+                {
+                    return null;
+                }
+
+                var entries = new Dictionary<string, MihomoProxy>(StringComparer.OrdinalIgnoreCase);
+                foreach (var property in proxiesElement.EnumerateObject())
+                {
+                    var proxy = ParseProxy(property.Name, property.Value);
+                    entries[property.Name] = proxy;
+                }
+
+                var snapshot = new MihomoProxiesSnapshot(entries);
+                _proxiesCache = snapshot;
+                _proxiesCacheAt = DateTimeOffset.UtcNow;
+                return snapshot;
+            }
+            finally
             {
-                return null;
+                _proxiesCacheGate.Release();
             }
-
-            var entries = new Dictionary<string, MihomoProxy>(StringComparer.OrdinalIgnoreCase);
-            foreach (var property in proxiesElement.EnumerateObject())
-            {
-                var proxy = ParseProxy(property.Name, property.Value);
-                entries[property.Name] = proxy;
-            }
-
-            var snapshot = new MihomoProxiesSnapshot(entries);
-            _proxiesCache = snapshot;
-            _proxiesCacheAt = DateTimeOffset.UtcNow;
-            return snapshot;
         }
-        finally
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            _proxiesCacheGate.Release();
+            throw;
+        }
+        catch (Exception ex) when (IsApiFailure(ex))
+        {
+            return null;
         }
     }
 
@@ -87,129 +99,230 @@ public sealed class MihomoApiClient
         return snapshot.Proxies.TryGetValue(groupName, out var proxy) ? proxy.Now : null;
     }
 
-    public async Task<bool> SetProxySelectionAsync(string groupName, string proxyName, CancellationToken cancellationToken = default)
+    public async Task<string?> GetResolvedSelectedProxyAsync(string groupName, CancellationToken cancellationToken = default)
     {
-        using var client = CreateClient();
-        var payload = JsonSerializer.Serialize(new { name = proxyName });
-        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-        using var response = await client.PutAsync($"proxies/{Uri.EscapeDataString(groupName)}", content, cancellationToken).ConfigureAwait(false);
-        var success = response.IsSuccessStatusCode;
-        if (success)
-        {
-            InvalidateProxiesCache();
-        }
-
-        return success;
-    }
-
-    public async Task<int> TestDelayAsync(string proxyName, int timeoutMs = 5000, CancellationToken cancellationToken = default)
-    {
-        using var client = CreateClient();
-        var url = $"proxies/{Uri.EscapeDataString(proxyName)}/delay?timeout={timeoutMs}&url=https://www.gstatic.com/generate_204";
-        using var response = await client.GetAsync(url, cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            return -1;
-        }
-
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        if (document.RootElement.TryGetProperty("delay", out var delayElement) && delayElement.TryGetInt32(out var delay))
-        {
-            return delay;
-        }
-
-        return -1;
-    }
-
-    public async Task<bool> SetModeAsync(string mode, CancellationToken cancellationToken = default)
-    {
-        using var client = CreateClient();
-        var payload = JsonSerializer.Serialize(new { mode });
-        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-        using var request = new HttpRequestMessage(new HttpMethod("PATCH"), "configs")
-        {
-            Content = content
-        };
-        using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        var success = response.IsSuccessStatusCode;
-        if (success)
-        {
-            InvalidateProxiesCache();
-        }
-
-        return success;
-    }
-
-    public async Task<MihomoConnectionSnapshot?> GetConnectionsAsync(CancellationToken cancellationToken = default)
-    {
-        using var client = CreateClient();
-        using var response = await client.GetAsync("connections", cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        var snapshot = await GetProxiesAsync(cancellationToken).ConfigureAwait(false);
+        if (snapshot is null)
         {
             return null;
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        var root = document.RootElement;
-
-        var uploadTotal = root.TryGetProperty("uploadTotal", out var uploadElement) ? uploadElement.GetInt64() : 0L;
-        var downloadTotal = root.TryGetProperty("downloadTotal", out var downloadElement) ? downloadElement.GetInt64() : 0L;
-
-        string? address = null;
-        var connections = new List<MihomoConnection>();
-        if (root.TryGetProperty("connections", out var connectionsElement) && connectionsElement.ValueKind == JsonValueKind.Array)
+        foreach (var candidate in BuildGroupCandidates(snapshot, groupName))
         {
-            foreach (var connection in connectionsElement.EnumerateArray())
+            var resolved = ResolveSelectedProxy(snapshot, candidate);
+            if (!string.IsNullOrWhiteSpace(resolved))
             {
-                if (!connection.TryGetProperty("metadata", out var metadata))
-                {
-                    continue;
-                }
-
-                address = ExtractAddress(metadata);
-                if (!string.IsNullOrWhiteSpace(address))
-                {
-                    break;
-                }
-            }
-
-            foreach (var connection in connectionsElement.EnumerateArray())
-            {
-                var parsed = ParseConnection(connection);
-                if (parsed is not null)
-                {
-                    connections.Add(parsed);
-                }
+                return resolved;
             }
         }
 
-        return new MihomoConnectionSnapshot(uploadTotal, downloadTotal, address, connections);
+        return null;
+    }
+
+    public async Task<bool> SetProxySelectionAsync(string groupName, string proxyName, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(proxyName))
+            {
+                return false;
+            }
+
+            if (await PutProxySelectionAsync(groupName, proxyName, cancellationToken).ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            InvalidateProxiesCache();
+            var snapshot = await GetProxiesAsync(cancellationToken).ConfigureAwait(false);
+            if (snapshot is null)
+            {
+                return false;
+            }
+
+            foreach (var candidate in BuildSelectionCandidates(snapshot, groupName, proxyName))
+            {
+                if (await PutProxySelectionAsync(candidate, proxyName, cancellationToken).ConfigureAwait(false))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsApiFailure(ex))
+        {
+            return false;
+        }
+    }
+
+    public async Task<int> TestDelayAsync(string proxyName, int timeoutMs = 5000, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var client = CreateClient();
+            var url = $"proxies/{Uri.EscapeDataString(proxyName)}/delay?timeout={timeoutMs}&url=https://www.gstatic.com/generate_204";
+            using var response = await client.GetAsync(url, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return -1;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (document.RootElement.TryGetProperty("delay", out var delayElement) && delayElement.TryGetInt32(out var delay))
+            {
+                return delay;
+            }
+
+            return -1;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsApiFailure(ex))
+        {
+            return -1;
+        }
+    }
+
+    public async Task<bool> SetModeAsync(string mode, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var client = CreateClient();
+            var payload = JsonSerializer.Serialize(new { mode });
+            using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+            using var request = new HttpRequestMessage(new HttpMethod("PATCH"), "configs")
+            {
+                Content = content
+            };
+            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var success = response.IsSuccessStatusCode;
+            if (success)
+            {
+                InvalidateProxiesCache();
+            }
+
+            return success;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsApiFailure(ex))
+        {
+            return false;
+        }
+    }
+
+    public async Task<MihomoConnectionSnapshot?> GetConnectionsAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var client = CreateClient();
+            using var response = await client.GetAsync("connections", cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var root = document.RootElement;
+
+            var uploadTotal = root.TryGetProperty("uploadTotal", out var uploadElement) ? uploadElement.GetInt64() : 0L;
+            var downloadTotal = root.TryGetProperty("downloadTotal", out var downloadElement) ? downloadElement.GetInt64() : 0L;
+
+            string? address = null;
+            var connections = new List<MihomoConnection>();
+            if (root.TryGetProperty("connections", out var connectionsElement) && connectionsElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var connection in connectionsElement.EnumerateArray())
+                {
+                    if (!connection.TryGetProperty("metadata", out var metadata))
+                    {
+                        continue;
+                    }
+
+                    address = ExtractAddress(metadata);
+                    if (!string.IsNullOrWhiteSpace(address))
+                    {
+                        break;
+                    }
+                }
+
+                foreach (var connection in connectionsElement.EnumerateArray())
+                {
+                    var parsed = ParseConnection(connection);
+                    if (parsed is not null)
+                    {
+                        connections.Add(parsed);
+                    }
+                }
+            }
+
+            return new MihomoConnectionSnapshot(uploadTotal, downloadTotal, address, connections);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsApiFailure(ex))
+        {
+            return null;
+        }
     }
 
     public async Task<bool> CloseAllConnectionsAsync(CancellationToken cancellationToken = default)
     {
-        using var client = CreateClient();
-        using var response = await client.DeleteAsync("connections", cancellationToken);
-        return response.IsSuccessStatusCode;
+        try
+        {
+            using var client = CreateClient();
+            using var response = await client.DeleteAsync("connections", cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsApiFailure(ex))
+        {
+            return false;
+        }
     }
 
     public async Task<bool> CloseConnectionAsync(string id, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(id))
+        try
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                return false;
+            }
+
+            using var client = CreateClient();
+            using var response = await client.DeleteAsync($"connections/{Uri.EscapeDataString(id)}", cancellationToken).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsApiFailure(ex))
         {
             return false;
         }
-
-        using var client = CreateClient();
-        using var response = await client.DeleteAsync($"connections/{Uri.EscapeDataString(id)}", cancellationToken);
-        return response.IsSuccessStatusCode;
     }
 
     private HttpClient CreateClient()
     {
-        var client = _httpClientFactory.CreateClient();
+        var client = _httpClientFactory.CreateClient("MihomoApi");
         client.BaseAddress = new Uri($"http://127.0.0.1:{_settingsStore.Settings.ApiPort}/");
         var secret = _settingsStore.Settings.ApiSecret;
         if (!string.IsNullOrWhiteSpace(secret))
@@ -354,5 +467,193 @@ public sealed class MihomoApiClient
     {
         _proxiesCache = null;
         _proxiesCacheAt = default;
+    }
+
+    private async Task<bool> PutProxySelectionAsync(string groupName, string proxyName, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(groupName))
+            {
+                return false;
+            }
+
+            using var client = CreateClient();
+            var payload = JsonSerializer.Serialize(new { name = proxyName });
+            using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+            using var response = await client.PutAsync($"proxies/{Uri.EscapeDataString(groupName)}", content, cancellationToken).ConfigureAwait(false);
+            var success = response.IsSuccessStatusCode;
+            if (success)
+            {
+                InvalidateProxiesCache();
+            }
+
+            return success;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (IsApiFailure(ex))
+        {
+            return false;
+        }
+    }
+
+    private IEnumerable<string> BuildSelectionCandidates(
+        MihomoProxiesSnapshot snapshot,
+        string requestedGroup,
+        string proxyName)
+    {
+        var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        bool Yield(string group)
+        {
+            if (string.IsNullOrWhiteSpace(group))
+            {
+                return false;
+            }
+
+            if (!yielded.Add(group))
+            {
+                return false;
+            }
+
+            if (!snapshot.Proxies.ContainsKey(group))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        var effectiveGroup = RoutingDefaults.ResolveSelectionGroup(
+            _settingsStore.Settings.SelectionGroup,
+            _settingsStore.Settings.UseSubscriptionPolicyGroups);
+
+        if (Yield(effectiveGroup))
+        {
+            yield return effectiveGroup;
+        }
+
+        if (Yield(_settingsStore.Settings.SelectionGroup))
+        {
+            yield return _settingsStore.Settings.SelectionGroup;
+        }
+
+        if (Yield(RoutingDefaults.FlatModeSelectionGroup))
+        {
+            yield return RoutingDefaults.FlatModeSelectionGroup;
+        }
+
+        if (Yield("GLOBAL"))
+        {
+            yield return "GLOBAL";
+        }
+
+        var selectorGroups = snapshot.Proxies.Values
+            .Where(proxy => proxy.All.Count > 0)
+            .Where(proxy => proxy.All.Contains(proxyName, StringComparer.Ordinal))
+            .OrderByDescending(proxy => string.Equals(proxy.Type, "Selector", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(proxy => string.Equals(proxy.Name, requestedGroup, StringComparison.OrdinalIgnoreCase))
+            .Select(proxy => proxy.Name);
+
+        foreach (var group in selectorGroups)
+        {
+            if (Yield(group))
+            {
+                yield return group;
+            }
+        }
+    }
+
+    private static string? ResolveSelectedProxy(MihomoProxiesSnapshot snapshot, string groupName)
+    {
+        if (string.IsNullOrWhiteSpace(groupName))
+        {
+            return null;
+        }
+
+        var current = groupName;
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (visited.Add(current))
+        {
+            if (!snapshot.Proxies.TryGetValue(current, out var proxy))
+            {
+                return current.Equals(groupName, StringComparison.OrdinalIgnoreCase) ? null : current;
+            }
+
+            if (string.IsNullOrWhiteSpace(proxy.Now))
+            {
+                return current.Equals(groupName, StringComparison.OrdinalIgnoreCase) ? null : current;
+            }
+
+            if (!snapshot.Proxies.TryGetValue(proxy.Now, out var selected) || selected.All.Count == 0)
+            {
+                return proxy.Now;
+            }
+
+            current = proxy.Now;
+        }
+
+        return current.Equals(groupName, StringComparison.OrdinalIgnoreCase) ? null : current;
+    }
+
+    private IEnumerable<string> BuildGroupCandidates(MihomoProxiesSnapshot snapshot, string requestedGroup)
+    {
+        var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        bool Yield(string group)
+        {
+            return !string.IsNullOrWhiteSpace(group) && yielded.Add(group);
+        }
+
+        if (Yield(requestedGroup))
+        {
+            yield return requestedGroup;
+        }
+
+        var effectiveGroup = RoutingDefaults.ResolveSelectionGroup(
+            _settingsStore.Settings.SelectionGroup,
+            _settingsStore.Settings.UseSubscriptionPolicyGroups);
+        if (Yield(effectiveGroup))
+        {
+            yield return effectiveGroup;
+        }
+
+        if (Yield(_settingsStore.Settings.SelectionGroup))
+        {
+            yield return _settingsStore.Settings.SelectionGroup;
+        }
+
+        if (Yield(RoutingDefaults.FlatModeSelectionGroup))
+        {
+            yield return RoutingDefaults.FlatModeSelectionGroup;
+        }
+
+        if (Yield("GLOBAL"))
+        {
+            yield return "GLOBAL";
+        }
+
+        foreach (var group in snapshot.Proxies.Values
+                     .Where(proxy => proxy.All.Count > 0)
+                     .OrderByDescending(proxy => proxy.Type.Equals("Selector", StringComparison.OrdinalIgnoreCase))
+                     .ThenBy(proxy => proxy.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            if (Yield(group.Name))
+            {
+                yield return group.Name;
+            }
+        }
+    }
+
+    private static bool IsApiFailure(Exception exception)
+    {
+        return exception is HttpRequestException
+            or TaskCanceledException
+            or IOException
+            or JsonException
+            or InvalidOperationException;
     }
 }

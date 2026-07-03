@@ -165,6 +165,8 @@ public sealed class SubscriptionService
         var proxies = new List<Dictionary<string, object>>();
         var nodes = new List<ProxyNode>();
         var groups = new List<Dictionary<string, object>>();
+        var ruleProviders = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        var rules = new List<string>();
 
         foreach (var profile in profiles.Where(profile => profile.IsEnabled))
         {
@@ -173,12 +175,67 @@ public sealed class SubscriptionService
                 continue;
             }
 
+            var parsed = ReparseRawCache(profile);
+            if (parsed is not null)
+            {
+                proxies.AddRange(parsed.Proxies);
+                nodes.AddRange(parsed.Nodes);
+                groups.AddRange(parsed.ProxyGroups);
+                rules.AddRange(parsed.Rules);
+
+                foreach (var provider in parsed.RuleProviders)
+                {
+                    if (!ruleProviders.ContainsKey(provider.Key))
+                    {
+                        ruleProviders[provider.Key] = provider.Value;
+                    }
+                }
+
+                continue;
+            }
+
             proxies.AddRange(_cacheStore.LoadProxies(profile.Id));
             nodes.AddRange(_cacheStore.LoadNodes(profile.Id));
             groups.AddRange(_cacheStore.LoadGroups(profile.Id));
+            rules.AddRange(_cacheStore.LoadRules(profile.Id));
+
+            foreach (var provider in _cacheStore.LoadRuleProviders(profile.Id))
+            {
+                if (!ruleProviders.ContainsKey(provider.Key))
+                {
+                    ruleProviders[provider.Key] = provider.Value;
+                }
+            }
         }
 
-        _proxyCatalogStore.Save(nodes, proxies, groups);
+        _proxyCatalogStore.Save(nodes, proxies, groups, ruleProviders, rules);
+    }
+
+    private SubscriptionParseResult? ReparseRawCache(SubscriptionProfile profile)
+    {
+        try
+        {
+            var raw = _cacheStore.LoadRaw(profile.Id);
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return null;
+            }
+
+            var parsed = _subscriptionParser.Parse(raw, profile.Name, profile.Id);
+            if (parsed.Nodes.Count == 0)
+            {
+                return null;
+            }
+
+            _cacheStore.Save(profile.Id, parsed);
+            profile.NodeCount = parsed.Nodes.Count;
+            return parsed;
+        }
+        catch (Exception ex)
+        {
+            CrashLogger.Log(ex, "SubscriptionService: ReparseRawCache");
+            return null;
+        }
     }
 
     private static void ConfigureSubscriptionClient(HttpClient client)

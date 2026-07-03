@@ -7,6 +7,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProxyStarter.App", "src\ProxyStarter.App\ProxyStarter.App.csproj", "{B9DF360B-4D8F-4E0C-BA6D-B8E829482E95}"
 EndProject
+Project("{54435603-DBB4-11D2-8724-00A0C9A8B90C}") = "ProxyStarter.Setup", "ProxyStarter.Setup\ProxyStarter.Setup.vdproj", "{C8577908-4376-0FF8-B7E0-D9FABD16AFAB}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -29,11 +31,20 @@ Global
 		{B9DF360B-4D8F-4E0C-BA6D-B8E829482E95}.Release|x64.Build.0 = Release|Any CPU
 		{B9DF360B-4D8F-4E0C-BA6D-B8E829482E95}.Release|x86.ActiveCfg = Release|Any CPU
 		{B9DF360B-4D8F-4E0C-BA6D-B8E829482E95}.Release|x86.Build.0 = Release|Any CPU
+		{C8577908-4376-0FF8-B7E0-D9FABD16AFAB}.Debug|Any CPU.ActiveCfg = Debug
+		{C8577908-4376-0FF8-B7E0-D9FABD16AFAB}.Debug|x64.ActiveCfg = Debug
+		{C8577908-4376-0FF8-B7E0-D9FABD16AFAB}.Debug|x86.ActiveCfg = Debug
+		{C8577908-4376-0FF8-B7E0-D9FABD16AFAB}.Release|Any CPU.ActiveCfg = Release
+		{C8577908-4376-0FF8-B7E0-D9FABD16AFAB}.Release|x64.ActiveCfg = Release
+		{C8577908-4376-0FF8-B7E0-D9FABD16AFAB}.Release|x86.ActiveCfg = Release
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{B9DF360B-4D8F-4E0C-BA6D-B8E829482E95} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {DA9B544E-50DD-47FB-B7A4-77619113CE0F}
 	EndGlobalSection
 EndGlobal

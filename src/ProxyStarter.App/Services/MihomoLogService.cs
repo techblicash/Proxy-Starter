@@ -1,6 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Net.Sockets;
 using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,10 +13,18 @@ namespace ProxyStarter.App.Services;
 
 public sealed class MihomoLogService : IDisposable
 {
+    public const int MaxRetentionLimit = 2000;
+
     private readonly AppSettingsStore _settingsStore;
+    private readonly object _syncRoot = new();
+    private readonly object _runSync = new();
+    private readonly Queue<LogEntry> _entries = new();
     private CancellationTokenSource? _cts;
+    private Task? _runTask;
 
     public event EventHandler<LogEntry>? LogReceived;
+
+    public int RetentionLimit => GetRetentionLimit();
 
     public MihomoLogService(AppSettingsStore settingsStore)
     {
@@ -22,24 +33,60 @@ public sealed class MihomoLogService : IDisposable
 
     public void Start()
     {
-        if (_cts is not null)
+        lock (_runSync)
         {
-            return;
-        }
+            if (_cts is not null)
+            {
+                return;
+            }
 
-        _cts = new CancellationTokenSource();
-        _ = RunAsync(_cts.Token);
+            var cts = new CancellationTokenSource();
+            _cts = cts;
+            _runTask = RunAsync(cts.Token).ContinueWith(
+                _ => cts.Dispose(),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
     }
 
     public void Stop()
     {
-        _cts?.Cancel();
-        _cts = null;
+        lock (_runSync)
+        {
+            _cts?.Cancel();
+            _cts = null;
+        }
     }
 
     public void Dispose()
     {
         Stop();
+    }
+
+    public IReadOnlyList<LogEntry> GetSnapshot()
+    {
+        lock (_syncRoot)
+        {
+            TrimEntries();
+            return _entries.ToArray();
+        }
+    }
+
+    public void Clear()
+    {
+        lock (_syncRoot)
+        {
+            _entries.Clear();
+        }
+    }
+
+    public void TrimToRetention()
+    {
+        lock (_syncRoot)
+        {
+            TrimEntries();
+        }
     }
 
     private async Task RunAsync(CancellationToken cancellationToken)
@@ -50,6 +97,7 @@ public sealed class MihomoLogService : IDisposable
             {
                 using var socket = new ClientWebSocket();
                 var settings = _settingsStore.Settings;
+                ApplyAuthorization(socket, settings.ApiSecret);
                 var level = string.IsNullOrWhiteSpace(settings.LogLevel) ? "info" : settings.LogLevel;
                 var query = $"level={Uri.EscapeDataString(level)}";
                 if (!string.IsNullOrWhiteSpace(settings.ApiSecret))
@@ -69,15 +117,23 @@ public sealed class MihomoLogService : IDisposable
                         break;
                     }
 
-                    var payload = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    if (TryParseLog(payload, out var entry))
+                    if (TryParseLog(buffer.AsMemory(0, result.Count), out var entry))
                     {
+                        AddEntry(entry);
                         LogReceived?.Invoke(this, entry);
                     }
                 }
             }
-            catch
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                return;
+            }
+            catch (Exception ex) when (IsExpectedWebSocketFailure(ex))
+            {
+            }
+            catch (Exception ex)
+            {
+                CrashLogger.Log(ex, "MihomoLogService: WebSocket");
             }
 
             try
@@ -91,7 +147,61 @@ public sealed class MihomoLogService : IDisposable
         }
     }
 
-    private static bool TryParseLog(string payload, out LogEntry entry)
+    private static void ApplyAuthorization(ClientWebSocket socket, string? secret)
+    {
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            return;
+        }
+
+        try
+        {
+            socket.Options.SetRequestHeader("Authorization", $"Bearer {secret}");
+        }
+        catch
+        {
+        }
+    }
+
+    private static bool IsExpectedWebSocketFailure(Exception exception)
+    {
+        return exception is WebSocketException
+            or HttpRequestException
+            or IOException
+            or SocketException
+            or TaskCanceledException;
+    }
+
+    private void AddEntry(LogEntry entry)
+    {
+        lock (_syncRoot)
+        {
+            _entries.Enqueue(entry);
+            TrimEntries();
+        }
+    }
+
+    private void TrimEntries()
+    {
+        var maxEntries = GetRetentionLimit();
+        while (_entries.Count > maxEntries)
+        {
+            _entries.Dequeue();
+        }
+    }
+
+    private int GetRetentionLimit()
+    {
+        var retention = _settingsStore.Settings.LogRetentionCount;
+        if (retention <= 0)
+        {
+            retention = 1;
+        }
+
+        return Math.Clamp(retention, 1, MaxRetentionLimit);
+    }
+
+    private static bool TryParseLog(ReadOnlyMemory<byte> payload, out LogEntry entry)
     {
         entry = new LogEntry();
 

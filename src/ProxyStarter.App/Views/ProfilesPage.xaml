@@ -4,7 +4,8 @@
       xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
       xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-      mc:Ignorable="d">
+      mc:Ignorable="d"
+      KeepAlive="True">
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="16">
             <TextBlock Text="{DynamicResource Text_Profiles}"
@@ -60,8 +61,8 @@
                             <DataGridTextColumn Header="{DynamicResource Text_Name}" Binding="{Binding Name}" Width="*" />
                             <DataGridTextColumn Header="{DynamicResource Text_URL}" Binding="{Binding Url}" Width="2*" />
                             <DataGridTextColumn Header="{DynamicResource Text_Nodes}" Binding="{Binding NodeCount}" Width="100" />
-                            <DataGridCheckBoxColumn Header="{DynamicResource Text_Enabled}" Binding="{Binding IsEnabled}" Width="100" />
-                            <DataGridCheckBoxColumn Header="{DynamicResource Text_AutoUpdate}" Binding="{Binding AutoUpdateEnabled}" Width="120" />
+                            <DataGridCheckBoxColumn Header="{DynamicResource Text_Enabled}" Binding="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="100" />
+                            <DataGridCheckBoxColumn Header="{DynamicResource Text_AutoUpdate}" Binding="{Binding AutoUpdateEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="120" />
                             <DataGridTextColumn Header="{DynamicResource Text_IntervalMinutes}" Binding="{Binding AutoUpdateIntervalMinutes}" Width="120" />
                             <DataGridTextColumn Header="{DynamicResource Text_LastUpdated}" Binding="{Binding LastUpdated}" Width="160" />
                         </DataGrid.Columns>

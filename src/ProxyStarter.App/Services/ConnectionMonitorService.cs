@@ -10,7 +10,9 @@ public sealed class ConnectionMonitorService : IDisposable
     private readonly MihomoApiClient _apiClient;
     private readonly AppSettingsStore _settingsStore;
     private readonly System.Threading.Timer _timer;
-    private bool _isRunning;
+    private CancellationTokenSource? _cts;
+    private volatile bool _isRunning;
+    private int _tickInProgress;
 
     public event EventHandler<ConnectionStatusSnapshot>? StatusUpdated;
 
@@ -29,32 +31,47 @@ public sealed class ConnectionMonitorService : IDisposable
         }
 
         _isRunning = true;
+        _cts = new CancellationTokenSource();
         _timer.Change(TimeSpan.Zero, TimeSpan.FromSeconds(2));
     }
 
     public void Stop()
     {
         _isRunning = false;
+        _cts?.Cancel();
         _timer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
     }
 
     public void Dispose()
     {
+        Stop();
+        _cts?.Dispose();
         _timer.Dispose();
     }
 
-    private async void OnTick(object? state)
+    private void OnTick(object? state)
     {
-        if (!_isRunning)
+        _ = OnTickAsync();
+    }
+
+    private async Task OnTickAsync()
+    {
+        if (!_isRunning || Interlocked.Exchange(ref _tickInProgress, 1) == 1)
         {
             return;
         }
 
+        var token = _cts?.Token ?? CancellationToken.None;
         try
         {
-            var connections = await _apiClient.GetConnectionsAsync();
-            var selectionGroup = _settingsStore.Settings.SelectionGroup;
-            var activeNode = await _apiClient.GetSelectedProxyAsync(selectionGroup);
+            var connections = await _apiClient.GetConnectionsAsync(token).ConfigureAwait(false);
+            var settings = _settingsStore.Settings;
+            var selectionGroup = RoutingDefaults.ResolveSelectionGroup(settings.SelectionGroup, settings.UseSubscriptionPolicyGroups);
+            var activeNode = await _apiClient.GetResolvedSelectedProxyAsync(selectionGroup, token).ConfigureAwait(false);
+            if (token.IsCancellationRequested || !_isRunning)
+            {
+                return;
+            }
 
             var snapshot = new ConnectionStatusSnapshot(
                 connections?.UploadTotal ?? 0,
@@ -64,8 +81,16 @@ public sealed class ConnectionMonitorService : IDisposable
 
             StatusUpdated?.Invoke(this, snapshot);
         }
-        catch
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
+        }
+        catch (Exception ex)
+        {
+            CrashLogger.Log(ex, "ConnectionMonitorService: Tick");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _tickInProgress, 0);
         }
     }
 }

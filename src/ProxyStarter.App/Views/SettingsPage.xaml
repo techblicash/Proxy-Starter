@@ -4,7 +4,52 @@
       xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
       xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
-      mc:Ignorable="d">
+      mc:Ignorable="d"
+      KeepAlive="True">
+    <Page.Resources>
+        <Style x:Key="SettingsSectionTitleStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,10" />
+        </Style>
+
+        <Style x:Key="SettingsItemTitleStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+
+        <Style x:Key="SettingsItemHintStyle" TargetType="TextBlock">
+            <Setter Property="Opacity" Value="0.65" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+        </Style>
+
+        <Style x:Key="SettingsRowStyle" TargetType="Grid">
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+
+        <Style x:Key="SettingsListItemStyle" TargetType="ListViewItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListViewItem">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Page.Resources>
+
     <Grid Margin="16"
           MinHeight="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType=ui:NavigationView}}">
         <Grid.RowDefinitions>
@@ -12,144 +57,402 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TextBlock Text="{DynamicResource Text_Settings}"
-                   FontSize="28"
-                   FontWeight="SemiBold"
-                   Margin="0,0,0,16" />
+        <Grid Margin="0,0,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-        <ScrollViewer Grid.Row="1"
-                      VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Disabled"
-                      PanningMode="VerticalOnly">
-            <Grid Margin="0,0,0,16">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
+            <TextBlock Text="{DynamicResource Text_Settings}"
+                       FontSize="28"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center" />
 
-                <StackPanel Grid.Column="0" Margin="0,0,12,0">
-                    <ui:Card Padding="16" Margin="0,0,0,16">
-                        <StackPanel>
-                            <TextBlock Text="{DynamicResource Text_Core}" FontSize="16" FontWeight="SemiBold" />
-                            <TextBlock Text="{DynamicResource Text_CorePath}" Opacity="0.7" Margin="0,12,0,0" />
-                            <TextBox Text="{Binding CorePath}" />
-                            <TextBlock Text="{DynamicResource Text_ConfigPath}" Opacity="0.7" Margin="0,12,0,0" />
-                            <TextBox Text="{Binding ConfigPath}" />
-                            <TextBlock Text="{DynamicResource Text_ApiSecret}" Opacity="0.7" Margin="0,12,0,0" />
-                            <TextBox Text="{Binding ApiSecret}" Width="200" />
+            <StackPanel Grid.Column="1"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center">
+                <ui:Button Content="{DynamicResource Text_Save}" Command="{Binding SaveCommand}" Margin="0,0,8,0" />
+                <ui:Button Content="{DynamicResource Text_Reload}" Command="{Binding ReloadCommand}" />
+            </StackPanel>
+        </Grid>
+
+        <ui:Card Grid.Row="1"
+                 Padding="16"
+                 HorizontalAlignment="Stretch"
+                 VerticalAlignment="Stretch"
+                 HorizontalContentAlignment="Stretch"
+                 VerticalContentAlignment="Stretch">
+            <Border Background="{DynamicResource LayerOnAcrylicFillColorDefaultBrush}"
+                    BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12">
+                <ui:ListView x:Name="SettingsList"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto"
+                             ScrollViewer.CanContentScroll="True"
+                             VirtualizingPanel.IsVirtualizing="True"
+                             VirtualizingPanel.VirtualizationMode="Recycling"
+                             VirtualizingStackPanel.ScrollUnit="Pixel"
+                             VerticalContentAlignment="Top">
+                    <ui:ListView.ItemContainerStyle>
+                        <StaticResource ResourceKey="SettingsListItemStyle" />
+                    </ui:ListView.ItemContainerStyle>
+
+                    <ui:ListView.Items>
+                        <StackPanel Margin="14,14,14,18">
+                                <TextBlock Text="{DynamicResource Text_Appearance}"
+                                           Style="{StaticResource SettingsSectionTitleStyle}" />
+                                <ui:Card Padding="12" Margin="0,0,0,18">
+                                    <StackPanel>
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_Language}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_LanguageHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <ComboBox Grid.Column="1"
+                                                      Width="180"
+                                                      ItemsSource="{Binding Languages}"
+                                                      SelectedItem="{Binding Language}"
+                                                      Style="{StaticResource CrispComboBoxStyle}" />
+                                        </Grid>
+
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_Theme}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_ThemeHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <ComboBox Grid.Column="1"
+                                                      Width="180"
+                                                      ItemsSource="{Binding Themes}"
+                                                      SelectedItem="{Binding Theme}"
+                                                      Style="{StaticResource CrispComboBoxStyle}" />
+                                        </Grid>
+
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_FontSize}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_FontSizeHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Slider Width="220"
+                                                        Minimum="10"
+                                                        Maximum="24"
+                                                        TickFrequency="1"
+                                                        IsSnapToTickEnabled="True"
+                                                        SmallChange="1"
+                                                        LargeChange="2"
+                                                        Value="{Binding FontSize}" />
+                                                <TextBlock Width="36"
+                                                           Margin="10,0,0,0"
+                                                           VerticalAlignment="Center"
+                                                           Text="{Binding FontSize}" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_PaneAcrylicOpacity}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_PaneAcrylicOpacityHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Slider Width="220"
+                                                        Minimum="0"
+                                                        Maximum="255"
+                                                        TickFrequency="1"
+                                                        IsSnapToTickEnabled="True"
+                                                        SmallChange="1"
+                                                        LargeChange="16"
+                                                        Value="{Binding PaneAcrylicOpacity}" />
+                                                <TextBlock Width="36"
+                                                           Margin="10,0,0,0"
+                                                           VerticalAlignment="Center"
+                                                           Text="{Binding PaneAcrylicOpacity}" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_ContentAcrylicOpacity}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_ContentAcrylicOpacityHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Slider Width="220"
+                                                        Minimum="0"
+                                                        Maximum="255"
+                                                        TickFrequency="1"
+                                                        IsSnapToTickEnabled="True"
+                                                        SmallChange="1"
+                                                        LargeChange="16"
+                                                        Value="{Binding ContentAcrylicOpacity}" />
+                                                <TextBlock Width="36"
+                                                           Margin="10,0,0,0"
+                                                           VerticalAlignment="Center"
+                                                           Text="{Binding ContentAcrylicOpacity}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </ui:Card>
+
+                                <TextBlock Text="{DynamicResource Text_Core}"
+                                           Style="{StaticResource SettingsSectionTitleStyle}" />
+                                <ui:Card Padding="12" Margin="0,0,0,18">
+                                    <StackPanel>
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="Core type" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="Select which installed core executable to launch."
+                                                           Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <ComboBox Grid.Column="1"
+                                                      Width="180"
+                                                      ItemsSource="{Binding CoreTypes}"
+                                                      DisplayMemberPath="DisplayName"
+                                                      SelectedValuePath="CoreType"
+                                                      SelectedValue="{Binding CoreType, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                      Style="{StaticResource CrispComboBoxStyle}" />
+                                        </Grid>
+
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_CorePath}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_CorePathHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <TextBox Grid.Column="1" Width="340" Text="{Binding CorePath}" />
+                                        </Grid>
+
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="Download cores" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{Binding CoreDownloadStatus}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                <ui:Button Content="Download selected"
+                                                           Command="{Binding DownloadSelectedCoreCommand}"
+                                                           Margin="0,0,8,0" />
+                                                <ui:Button Content="Download all"
+                                                           Command="{Binding DownloadAllCoresCommand}" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_ConfigPath}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_ConfigPathHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <TextBox Grid.Column="1" Width="340" Text="{Binding ConfigPath}" />
+                                        </Grid>
+
+                                        <Grid Margin="0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_ApiSecret}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_ApiSecretHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <TextBox Grid.Column="1" Width="220" Text="{Binding ApiSecret}" />
+                                        </Grid>
+                                    </StackPanel>
+                                </ui:Card>
+
+                                <TextBlock Text="{DynamicResource Text_NetworkSettings}"
+                                           Style="{StaticResource SettingsSectionTitleStyle}" />
+                                <ui:Card Padding="12" Margin="0,0,0,18">
+                                    <StackPanel>
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_AllowLan}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_AllowLanHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <CheckBox Grid.Column="1" IsChecked="{Binding AllowLan}" VerticalAlignment="Center" />
+                                        </Grid>
+
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_SpeedLimit}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_LimitHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                                <StackPanel Margin="0,0,12,0">
+                                                    <TextBlock Text="{DynamicResource Text_DownloadLimit}" Opacity="0.7" />
+                                                    <TextBox Width="110" Text="{Binding DownloadLimitKbps}" />
+                                                </StackPanel>
+                                                <StackPanel>
+                                                    <TextBlock Text="{DynamicResource Text_UploadLimit}" Opacity="0.7" />
+                                                    <TextBox Width="110" Text="{Binding UploadLimitKbps}" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid Margin="0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_BlockedWebsites}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_BlockedWebsitesHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <TextBox Grid.Column="1"
+                                                     Width="340"
+                                                     MinHeight="120"
+                                                     Text="{Binding BlockedSites}"
+                                                     AcceptsReturn="True"
+                                                     VerticalScrollBarVisibility="Auto"
+                                                     TextWrapping="Wrap"
+                                                     VerticalAlignment="Top" />
+                                        </Grid>
+                                    </StackPanel>
+                                </ui:Card>
+
+                                <TextBlock Text="{DynamicResource Text_SoftwareSettings}"
+                                           Style="{StaticResource SettingsSectionTitleStyle}" />
+                                <ui:Card Padding="12" Margin="0">
+                                    <StackPanel>
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="使用订阅策略组" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="关闭后节点页仅显示节点，并使用规则页自定义规则（为空时使用默认规则）"
+                                                           Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <CheckBox Grid.Column="1"
+                                                      IsChecked="{Binding UseSubscriptionPolicyGroups}"
+                                                      VerticalAlignment="Center" />
+                                        </Grid>
+
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_LogLevel}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_LogLevelHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <ComboBox Grid.Column="1"
+                                                      Width="180"
+                                                      ItemsSource="{Binding LogLevels}"
+                                                      SelectedItem="{Binding LogLevel}"
+                                                      Style="{StaticResource CrispComboBoxStyle}" />
+                                        </Grid>
+
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_LogRetention}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_LogRetentionHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <TextBox Grid.Column="1" Width="180" Text="{Binding LogRetentionCount}" />
+                                        </Grid>
+
+                                        <Grid Margin="0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_AutoStart}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_AutoStartHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <CheckBox Grid.Column="1" IsChecked="{Binding AutoStart}" VerticalAlignment="Center" />
+                                        </Grid>
+
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_UpdateFeedUrl}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_UpdateFeedUrlHint}"
+                                                           Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <TextBox Grid.Column="1"
+                                                     Width="340"
+                                                     Text="{Binding UpdateFeedUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                        </Grid>
+
+                                        <Grid Margin="0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_SoftwareUpdate}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{Binding SoftwareUpdateStatus}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1"
+                                                        Orientation="Horizontal"
+                                                        VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding CurrentVersion}"
+                                                           Opacity="0.7"
+                                                           Margin="0,0,12,0"
+                                                           VerticalAlignment="Center" />
+                                                <ui:Button Content="{DynamicResource Text_CheckUpdate}"
+                                                           Command="{Binding CheckSoftwareUpdateCommand}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </ui:Card>
                         </StackPanel>
-                    </ui:Card>
-
-                    <ui:Card Padding="16">
-                        <StackPanel>
-                            <TextBlock Text="{DynamicResource Text_NetworkSettings}" FontSize="16" FontWeight="SemiBold" />
-                            <CheckBox Content="{DynamicResource Text_AllowLan}"
-                                      IsChecked="{Binding AllowLan}"
-                                      Margin="0,12,0,0" />
-                            <TextBlock Text="{DynamicResource Text_SpeedLimit}" Opacity="0.7" Margin="0,12,0,0" />
-                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                <StackPanel Margin="0,0,12,0">
-                                    <TextBlock Text="{DynamicResource Text_DownloadLimit}" Opacity="0.7" />
-                                    <TextBox Text="{Binding DownloadLimitKbps}" Width="120" />
-                                </StackPanel>
-                                <StackPanel>
-                                    <TextBlock Text="{DynamicResource Text_UploadLimit}" Opacity="0.7" />
-                                    <TextBox Text="{Binding UploadLimitKbps}" Width="120" />
-                                </StackPanel>
-                            </StackPanel>
-                            <TextBlock Text="{DynamicResource Text_LimitHint}" Opacity="0.6" Margin="0,8,0,0" />
-
-                            <TextBlock Text="{DynamicResource Text_BlockedWebsites}" Opacity="0.7" Margin="0,12,0,0" />
-                            <TextBox Text="{Binding BlockedSites}"
-                                     AcceptsReturn="True"
-                                     TextWrapping="Wrap"
-                                     MinHeight="120" />
-                        </StackPanel>
-                    </ui:Card>
-                </StackPanel>
-
-                <StackPanel Grid.Column="1">
-                    <ui:Card Padding="16" Margin="0,0,0,16">
-                        <StackPanel>
-                            <TextBlock Text="{DynamicResource Text_Appearance}" FontSize="16" FontWeight="SemiBold" />
-                            <TextBlock Text="{DynamicResource Text_Theme}" Opacity="0.7" Margin="0,12,0,0" />
-                            <ComboBox ItemsSource="{Binding Themes}"
-                                      SelectedItem="{Binding Theme}"
-                                      Width="160"
-                                      Style="{StaticResource CrispComboBoxStyle}" />
-                            <TextBlock Text="{DynamicResource Text_FontSize}" Opacity="0.7" Margin="0,12,0,0" />
-                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                <Slider Minimum="10"
-                                        Maximum="24"
-                                        TickFrequency="1"
-                                        IsSnapToTickEnabled="True"
-                                        SmallChange="1"
-                                        LargeChange="2"
-                                        Value="{Binding FontSize}"
-                                        Width="240" />
-                                <TextBlock Text="{Binding FontSize}"
-                                           Width="40"
-                                           Margin="12,0,0,0"
-                                           VerticalAlignment="Center" />
-                            </StackPanel>
-                            <TextBlock Text="{DynamicResource Text_Language}" Opacity="0.7" Margin="0,12,0,0" />
-                            <ComboBox ItemsSource="{Binding Languages}"
-                                      SelectedItem="{Binding Language}"
-                                      Width="160"
-                                      Style="{StaticResource CrispComboBoxStyle}" />
-                            <TextBlock Text="{DynamicResource Text_PaneAcrylicOpacity}" Opacity="0.7" Margin="0,12,0,0" />
-                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                <Slider Minimum="0"
-                                        Maximum="255"
-                                        TickFrequency="1"
-                                        IsSnapToTickEnabled="True"
-                                        SmallChange="1"
-                                        LargeChange="16"
-                                        Value="{Binding PaneAcrylicOpacity}"
-                                        Width="240" />
-                                <TextBlock Text="{Binding PaneAcrylicOpacity}"
-                                           Width="40"
-                                           Margin="12,0,0,0"
-                                           VerticalAlignment="Center" />
-                            </StackPanel>
-                            <TextBlock Text="{DynamicResource Text_ContentAcrylicOpacity}" Opacity="0.7" Margin="0,12,0,0" />
-                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                <Slider Minimum="0"
-                                        Maximum="255"
-                                        TickFrequency="1"
-                                        IsSnapToTickEnabled="True"
-                                        SmallChange="1"
-                                        LargeChange="16"
-                                        Value="{Binding ContentAcrylicOpacity}"
-                                        Width="240" />
-                                <TextBlock Text="{Binding ContentAcrylicOpacity}"
-                                           Width="40"
-                                           Margin="12,0,0,0"
-                                           VerticalAlignment="Center" />
-                            </StackPanel>
-                        </StackPanel>
-                    </ui:Card>
-
-                    <ui:Card Padding="16" Margin="0,0,0,16">
-                        <StackPanel>
-                            <TextBlock Text="{DynamicResource Text_SoftwareSettings}" FontSize="16" FontWeight="SemiBold" />
-                            <TextBlock Text="{DynamicResource Text_LogLevel}" Opacity="0.7" Margin="0,12,0,0" />
-                            <ComboBox ItemsSource="{Binding LogLevels}"
-                                      SelectedItem="{Binding LogLevel}"
-                                      Width="160"
-                                      Style="{StaticResource CrispComboBoxStyle}" />
-                            <CheckBox Content="{DynamicResource Text_AutoStart}" IsChecked="{Binding AutoStart}" Margin="0,12,0,0" />
-                            <CheckBox Content="{DynamicResource Text_AutoUpdate}" IsChecked="{Binding AutoUpdate}" />
-                            <TextBlock Text="{DynamicResource Text_UpdateFeedUrl}" Opacity="0.7" Margin="0,12,0,0" />
-                            <TextBox Text="{Binding UpdateFeedUrl}" />
-                            <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-                                <ui:Button Content="{DynamicResource Text_Save}" Command="{Binding SaveCommand}" Margin="0,0,8,0" />
-                                <ui:Button Content="{DynamicResource Text_Reload}" Command="{Binding ReloadCommand}" />
-                            </StackPanel>
-                        </StackPanel>
-                    </ui:Card>
-                </StackPanel>
-            </Grid>
-        </ScrollViewer>
+                    </ui:ListView.Items>
+                </ui:ListView>
+            </Border>
+        </ui:Card>
     </Grid>
 </Page>

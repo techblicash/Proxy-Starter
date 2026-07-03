@@ -2,23 +2,31 @@ using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Data;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ProxyStarter.App.Helpers;
 using ProxyStarter.App.Models;
 using ProxyStarter.App.Services;
 
 namespace ProxyStarter.App.ViewModels;
 
-public partial class ConnectionsViewModel : ObservableObject
+public partial class ConnectionsViewModel : ObservableObject, IPageLifecycleAware
 {
     private readonly ConnectionsMonitorService _monitorService;
     private readonly MihomoApiClient _apiClient;
     private readonly LocalizationService _localizationService;
     private readonly ICollectionView _connectionsView;
+    private readonly Dictionary<string, ConnectionItem> _connectionLookup = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _seenConnectionIds = new(StringComparer.Ordinal);
+    private MihomoConnectionSnapshot? _latestSnapshot;
+    private bool _isActive;
+    private int _applyQueued;
 
     public ObservableCollection<ConnectionItem> Connections { get; } = new();
 
@@ -53,8 +61,6 @@ public partial class ConnectionsViewModel : ObservableObject
         _connectionsView = CollectionViewSource.GetDefaultView(Connections);
         _connectionsView.Filter = OnFilterConnection;
 
-        _monitorService.SnapshotUpdated += OnSnapshotUpdated;
-        _monitorService.Start();
         _localizationService.LanguageChanged += (_, _) => UpdatePauseLabel();
         UpdatePauseLabel();
     }
@@ -64,6 +70,11 @@ public partial class ConnectionsViewModel : ObservableObject
     {
         IsPaused = !IsPaused;
         UpdatePauseLabel();
+
+        if (!IsPaused && _isActive)
+        {
+            QueueApplySnapshot();
+        }
     }
 
     private void UpdatePauseLabel()
@@ -97,28 +108,52 @@ public partial class ConnectionsViewModel : ObservableObject
 
     private void OnSnapshotUpdated(object? sender, MihomoConnectionSnapshot snapshot)
     {
-        if (IsPaused)
+        _latestSnapshot = snapshot;
+
+        if (!_isActive || IsPaused)
         {
             return;
         }
 
-        if (Application.Current is null)
-        {
-            ApplySnapshot(snapshot);
-            return;
-        }
-
-        Application.Current.Dispatcher.Invoke(() => ApplySnapshot(snapshot));
+        QueueApplySnapshot();
     }
 
     private void ApplySnapshot(MihomoConnectionSnapshot snapshot)
     {
+        _latestSnapshot = snapshot;
         var items = snapshot.Connections ?? Array.Empty<MihomoConnection>();
-        Connections.Clear();
+        _seenConnectionIds.Clear();
 
+        // Update or add current connections. New items are inserted at the top to keep "fresh" traffic visible.
         foreach (var connection in items)
         {
-            Connections.Add(MapConnection(connection));
+            var id = connection.Id;
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                continue;
+            }
+
+            _seenConnectionIds.Add(id);
+
+            if (!_connectionLookup.TryGetValue(id, out var item))
+            {
+                item = new ConnectionItem { Id = id };
+                _connectionLookup[id] = item;
+                Connections.Insert(0, item);
+            }
+
+            UpdateConnectionItem(item, connection);
+        }
+
+        // Remove connections that are no longer present.
+        for (var i = Connections.Count - 1; i >= 0; i--)
+        {
+            var existing = Connections[i];
+            if (string.IsNullOrWhiteSpace(existing.Id) || !_seenConnectionIds.Contains(existing.Id))
+            {
+                _connectionLookup.Remove(existing.Id);
+                Connections.RemoveAt(i);
+            }
         }
 
         ConnectionCount = Connections.Count.ToString(CultureInfo.InvariantCulture);
@@ -145,7 +180,7 @@ public partial class ConnectionsViewModel : ObservableObject
                || connection.Process.Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static ConnectionItem MapConnection(MihomoConnection connection)
+    private static void UpdateConnectionItem(ConnectionItem item, MihomoConnection connection)
     {
         var proxy = connection.Proxy;
         if (string.IsNullOrWhiteSpace(proxy) && connection.Chains.Count > 0)
@@ -153,22 +188,90 @@ public partial class ConnectionsViewModel : ObservableObject
             proxy = connection.Chains.Last();
         }
 
-        var item = new ConnectionItem
-        {
-            Id = connection.Id,
-            Target = string.IsNullOrWhiteSpace(connection.Target) ? "Unknown" : connection.Target,
-            Network = connection.Network.ToUpperInvariant(),
-            Type = string.IsNullOrWhiteSpace(connection.Type) ? string.Empty : connection.Type.ToUpperInvariant(),
-            Rule = string.IsNullOrWhiteSpace(connection.Rule) ? "MATCH" : connection.Rule,
-            Proxy = proxy ?? string.Empty,
-            Process = connection.Process,
-            Upload = connection.Upload,
-            Download = connection.Download,
-            Start = connection.Start,
-            Age = FormatAge(DateTimeOffset.Now - connection.Start)
-        };
+        item.Target = string.IsNullOrWhiteSpace(connection.Target) ? "Unknown" : connection.Target;
+        item.Network = connection.Network.ToUpperInvariant();
+        item.Type = string.IsNullOrWhiteSpace(connection.Type) ? string.Empty : connection.Type.ToUpperInvariant();
+        item.Rule = string.IsNullOrWhiteSpace(connection.Rule) ? "MATCH" : connection.Rule;
+        item.Proxy = proxy ?? string.Empty;
+        item.Process = connection.Process;
+        item.Upload = connection.Upload;
+        item.Download = connection.Download;
+        item.Start = connection.Start;
+        item.Age = FormatAge(DateTimeOffset.Now - connection.Start);
+    }
 
-        return item;
+    private void QueueApplySnapshot()
+    {
+        if (Interlocked.Exchange(ref _applyQueued, 1) == 1)
+        {
+            return;
+        }
+
+        if (Application.Current is null)
+        {
+            Interlocked.Exchange(ref _applyQueued, 0);
+            return;
+        }
+
+        Application.Current.Dispatcher.BeginInvoke(() =>
+        {
+            try
+            {
+                if (!_isActive || IsPaused)
+                {
+                    return;
+                }
+
+                var snapshot = _latestSnapshot;
+                if (snapshot is not null)
+                {
+                    ApplySnapshot(snapshot);
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _applyQueued, 0);
+            }
+        }, System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    public void OnPageActivated()
+    {
+        if (_isActive)
+        {
+            return;
+        }
+
+        _isActive = true;
+
+        try
+        {
+            _monitorService.SnapshotUpdated -= OnSnapshotUpdated;
+            _monitorService.SnapshotUpdated += OnSnapshotUpdated;
+            _monitorService.Start();
+        }
+        catch
+        {
+        }
+
+        if (!IsPaused)
+        {
+            QueueApplySnapshot();
+        }
+    }
+
+    public void OnPageDeactivated()
+    {
+        _isActive = false;
+
+        try
+        {
+            _monitorService.SnapshotUpdated -= OnSnapshotUpdated;
+            _monitorService.Stop();
+        }
+        catch
+        {
+        }
     }
 
     private static string FormatAge(TimeSpan elapsed)

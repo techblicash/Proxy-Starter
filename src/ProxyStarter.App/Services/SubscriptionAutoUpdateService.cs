@@ -15,7 +15,9 @@ public sealed class SubscriptionAutoUpdateService : IDisposable
     private readonly SubscriptionStore _subscriptionStore;
     private readonly SubscriptionService _subscriptionService;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private System.Threading.Timer? _timer;
+    private readonly object _sync = new();
+    private CancellationTokenSource? _cts;
+    private Task? _runTask;
 
     public SubscriptionAutoUpdateService(SubscriptionStore subscriptionStore, SubscriptionService subscriptionService)
     {
@@ -25,18 +27,30 @@ public sealed class SubscriptionAutoUpdateService : IDisposable
 
     public void Start()
     {
-        if (_timer is not null)
+        lock (_sync)
         {
-            return;
-        }
+            if (_cts is not null)
+            {
+                return;
+            }
 
-        _timer = new System.Threading.Timer(OnTick, null, InitialDelay, TickInterval);
+            var cts = new CancellationTokenSource();
+            _cts = cts;
+            _runTask = RunAsync(cts.Token).ContinueWith(
+                _ => cts.Dispose(),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
     }
 
     public void Stop()
     {
-        _timer?.Dispose();
-        _timer = null;
+        lock (_sync)
+        {
+            _cts?.Cancel();
+            _cts = null;
+        }
     }
 
     public void Dispose()
@@ -45,9 +59,29 @@ public sealed class SubscriptionAutoUpdateService : IDisposable
         _gate.Dispose();
     }
 
-    private async void OnTick(object? state)
+    private async Task RunAsync(CancellationToken cancellationToken)
     {
-        if (!await _gate.WaitAsync(0))
+        try
+        {
+            await Task.Delay(InitialDelay, cancellationToken).ConfigureAwait(false);
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await OnTickAsync(cancellationToken).ConfigureAwait(false);
+                await Task.Delay(TickInterval, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            CrashLogger.Log(ex, "SubscriptionAutoUpdateService: Run");
+        }
+    }
+
+    private async Task OnTickAsync(CancellationToken cancellationToken)
+    {
+        if (!await _gate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
         {
             return;
         }
@@ -65,10 +99,15 @@ public sealed class SubscriptionAutoUpdateService : IDisposable
             {
                 try
                 {
-                    await _subscriptionService.RefreshProfileAsync(profile);
+                    await _subscriptionService.RefreshProfileAsync(profile, cancellationToken).ConfigureAwait(false);
                 }
-                catch
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    CrashLogger.Log(ex, $"SubscriptionAutoUpdateService: Refresh {profile.Name}");
                 }
             }
 

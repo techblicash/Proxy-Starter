@@ -17,14 +17,7 @@ public sealed class RulesStore
 
     public string LoadText()
     {
-        try
-        {
-            return File.Exists(_rulesPath) ? File.ReadAllText(_rulesPath) : string.Empty;
-        }
-        catch
-        {
-            return string.Empty;
-        }
+        return AtomicFile.ReadAllTextOrEmpty(_rulesPath);
     }
 
     public IReadOnlyList<string> LoadRules()
@@ -46,11 +39,11 @@ public sealed class RulesStore
     {
         try
         {
-            Directory.CreateDirectory(AppPaths.DataDirectory);
-            File.WriteAllText(_rulesPath, text ?? string.Empty, new UTF8Encoding(false));
+            AtomicFile.WriteAllText(_rulesPath, text ?? string.Empty, new UTF8Encoding(false));
         }
-        catch
+        catch (Exception ex)
         {
+            CrashLogger.Log(ex, "RulesStore: Save rules");
         }
     }
 }

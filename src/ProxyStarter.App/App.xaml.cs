@@ -25,17 +25,29 @@ public partial class App : System.Windows.Application
             .ConfigureServices((_, services) =>
             {
                 services.AddHttpClient();
+                services.AddHttpClient("MihomoApi", client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(3);
+                });
                 services.AddHttpClient("SubscriptionDirect")
+                    .ConfigureHttpClient(client =>
+                    {
+                        client.Timeout = TimeSpan.FromSeconds(30);
+                    })
                     .ConfigurePrimaryHttpMessageHandler(() =>
                     {
-                        return new System.Net.Http.WinHttpHandler
+                        return new System.Net.Http.HttpClientHandler
                         {
                             AutomaticDecompression = System.Net.DecompressionMethods.All,
-                            WindowsProxyUsePolicy = System.Net.Http.WindowsProxyUsePolicy.UseWinHttpProxy
+                            UseProxy = false
                         };
                     });
 
                 services.AddHttpClient("SubscriptionSystemProxy")
+                    .ConfigureHttpClient(client =>
+                    {
+                        client.Timeout = TimeSpan.FromSeconds(30);
+                    })
                     .ConfigurePrimaryHttpMessageHandler(() =>
                     {
                         return new System.Net.Http.WinHttpHandler
@@ -46,12 +58,20 @@ public partial class App : System.Windows.Application
                     });
                 services.AddSingleton<AppSettingsStore>();
                 services.AddSingleton<SubscriptionStore>();
+                services.AddSingleton<DefaultRulesService>();
                 services.AddSingleton<SubscriptionCacheStore>();
                 services.AddSingleton<ProxyCatalogStore>();
                 services.AddSingleton<SubscriptionParser>();
                 services.AddSingleton<SubscriptionService>();
                 services.AddSingleton<RulesStore>();
                 services.AddSingleton<ConfigWriter>();
+                services.AddSingleton<SingBoxConfigWriter>();
+                services.AddSingleton<MihomoCoreAdapter>();
+                services.AddSingleton<SingBoxCoreAdapter>();
+                services.AddSingleton<ProxyCoreAdapterFactory>();
+                services.AddSingleton<CoreDownloadService>();
+                services.AddSingleton<SoftwareUpdateService>();
+                services.AddSingleton<SystemProxyService>();
                 services.AddSingleton<IMihomoProcessService, MihomoProcessService>();
                 services.AddSingleton<CoreController>();
                 services.AddSingleton<TrafficMonitorService>();
@@ -64,7 +84,6 @@ public partial class App : System.Windows.Application
                 services.AddSingleton<AutoStartService>();
                 services.AddSingleton<QosPolicyService>();
                 services.AddSingleton<IDialogService, DialogService>();
-                services.AddSingleton<UpdateService>();
                 services.AddSingleton<AppThemeService>();
                 services.AddSingleton<LocalizationService>();
                 services.AddSingleton<IWindowService, WindowService>();
@@ -108,6 +127,8 @@ public partial class App : System.Windows.Application
         await _host.StartAsync();
 
         var settingsStore = _host.Services.GetRequiredService<AppSettingsStore>();
+        var systemProxyService = _host.Services.GetRequiredService<SystemProxyService>();
+        systemProxyService.Restore();
         var localizationService = _host.Services.GetRequiredService<LocalizationService>();
         localizationService.ApplyLanguage(settingsStore.Settings.Language);
 
@@ -124,14 +145,12 @@ public partial class App : System.Windows.Application
 
         var qosPolicyService = _host.Services.GetRequiredService<QosPolicyService>();
         _ = qosPolicyService.ApplyAsync(settingsStore.Settings, silent: true);
-        if (settingsStore.Settings.AutoUpdate)
-        {
-            var updateService = _host.Services.GetRequiredService<UpdateService>();
-            _ = updateService.CheckForUpdatesAsync(silent: true);
-        }
 
         var subscriptionAutoUpdate = _host.Services.GetRequiredService<SubscriptionAutoUpdateService>();
         subscriptionAutoUpdate.Start();
+
+        var logService = _host.Services.GetRequiredService<MihomoLogService>();
+        logService.Start();
 
         var window = _host.Services.GetRequiredService<MainWindow>();
         Current.MainWindow = window;
@@ -175,6 +194,19 @@ public partial class App : System.Windows.Application
 
     protected override async void OnExit(ExitEventArgs e)
     {
+        try
+        {
+            var coreController = _host.Services.GetService<CoreController>();
+            if (coreController is not null)
+            {
+                await coreController.StopAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            CrashLogger.Log(ex, "OnExit: Stop core");
+        }
+
         await _host.StopAsync();
         _host.Dispose();
 

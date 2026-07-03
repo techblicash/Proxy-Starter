@@ -1,23 +1,32 @@
 ﻿using System;
 using System.Globalization;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ProxyStarter.App.Helpers;
 using ProxyStarter.App.Models;
 using ProxyStarter.App.Services;
 
 namespace ProxyStarter.App.ViewModels;
 
-public partial class DashboardViewModel : ObservableObject
+public partial class DashboardViewModel : ObservableObject, IPageLifecycleAware
 {
     private readonly CoreController _coreController;
     private readonly TrafficMonitorService _trafficMonitorService;
     private readonly ConnectionMonitorService _connectionMonitorService;
     private readonly AppSettingsStore _settingsStore;
+    private readonly ProxyCatalogStore _proxyCatalogStore;
+    private readonly SubscriptionStore _subscriptionStore;
     private readonly IDialogService _dialogService;
     private readonly LocalizationService _localizationService;
+    private bool _isActive;
+    private TrafficSnapshot _latestTraffic = new(0, 0, 0, 0);
+    private ConnectionStatusSnapshot _latestStatus = new(0, 0, string.Empty, null);
+    private int _trafficUiQueued;
+    private int _statusUiQueued;
 
     [ObservableProperty]
     private string _statusText = "Stopped";
@@ -69,6 +78,8 @@ public partial class DashboardViewModel : ObservableObject
         TrafficMonitorService trafficMonitorService,
         ConnectionMonitorService connectionMonitorService,
         AppSettingsStore settingsStore,
+        ProxyCatalogStore proxyCatalogStore,
+        SubscriptionStore subscriptionStore,
         IDialogService dialogService,
         LocalizationService localizationService)
     {
@@ -76,6 +87,8 @@ public partial class DashboardViewModel : ObservableObject
         _trafficMonitorService = trafficMonitorService;
         _connectionMonitorService = connectionMonitorService;
         _settingsStore = settingsStore;
+        _proxyCatalogStore = proxyCatalogStore;
+        _subscriptionStore = subscriptionStore;
         _dialogService = dialogService;
         _localizationService = localizationService;
 
@@ -85,11 +98,7 @@ public partial class DashboardViewModel : ObservableObject
         _coreController.RunningChanged += (_, _) => Dispatch(UpdateStatus);
         _localizationService.LanguageChanged += (_, _) => Dispatch(UpdateStatus);
 
-        _trafficMonitorService.TrafficUpdated += OnTrafficUpdated;
-        _trafficMonitorService.Start();
-
-        _connectionMonitorService.StatusUpdated += OnStatusUpdated;
-        _connectionMonitorService.Start();
+        // Monitors are started only while the Dashboard page is visible to reduce UI churn.
     }
 
     [RelayCommand]
@@ -97,42 +106,86 @@ public partial class DashboardViewModel : ObservableObject
     {
         if (!_coreController.IsRunning)
         {
-            var corePath = ResolveCorePath(_settingsStore.Settings.CorePath);
+            if (_settingsStore.Settings.TunEnabled && !ElevationHelper.IsRunningAsAdministrator())
+            {
+                var relaunched = await RequestElevationForTunAsync();
+                if (relaunched)
+                {
+                    Application.Current?.Shutdown();
+                }
+
+                return;
+            }
+
+            var corePath = ProxyCorePath.ResolveExecutable(_settingsStore.Settings.CorePath);
             if (!File.Exists(corePath))
             {
                 await _dialogService.ShowErrorAsync(
-                    "Mihomo Core Not Found",
-                    $"Core executable was not found:\n{corePath}\n\nPlease download Mihomo and update Core Path in Settings.");
+                    "Core Not Found",
+                    $"Core executable was not found:\n{corePath}\n\nPlease update Core Path in Settings.");
                 return;
             }
         }
 
-        await _coreController.ToggleAsync();
+        try
+        {
+            await _coreController.ToggleAsync();
+        }
+        catch (Exception ex)
+        {
+            CrashLogger.Log(ex, "DashboardViewModel: Toggle core");
+            await _dialogService.ShowErrorAsync("Core Operation Failed", ex.Message);
+        }
     }
 
     [RelayCommand]
     private async Task SaveNetworkAsync()
     {
-        var settings = _settingsStore.Settings;
-        var wasRunning = _coreController.IsRunning;
-        var needsRestart =
-            settings.MixedPort != MixedPort
-            || settings.HttpPort != HttpPort
-            || settings.SocksPort != SocksPort
-            || settings.ApiPort != ApiPort
-            || settings.TunEnabled != TunEnabled;
-
-        settings.MixedPort = MixedPort;
-        settings.HttpPort = HttpPort;
-        settings.SocksPort = SocksPort;
-        settings.ApiPort = ApiPort;
-        settings.TunEnabled = TunEnabled;
-        _settingsStore.Save();
-
-        if (wasRunning && needsRestart)
+        try
         {
-            await _coreController.StopAsync();
-            await _coreController.StartAsync();
+            var settings = _settingsStore.Settings;
+
+            if (TunEnabled && !ElevationHelper.IsRunningAsAdministrator())
+            {
+                var relaunched = await RequestElevationForTunAsync();
+                if (relaunched)
+                {
+                    Application.Current?.Shutdown();
+                }
+                else
+                {
+                    TunEnabled = settings.TunEnabled;
+                }
+
+                return;
+            }
+
+            var wasRunning = _coreController.IsRunning;
+            var needsRestart =
+                settings.MixedPort != MixedPort
+                || settings.HttpPort != HttpPort
+                || settings.SocksPort != SocksPort
+                || settings.ApiPort != ApiPort
+                || settings.TunEnabled != TunEnabled;
+
+            settings.MixedPort = MixedPort;
+            settings.HttpPort = HttpPort;
+            settings.SocksPort = SocksPort;
+            settings.ApiPort = ApiPort;
+            settings.TunEnabled = TunEnabled;
+            _settingsStore.Save();
+
+            if (wasRunning && needsRestart)
+            {
+                await _coreController.StopAsync();
+                await _coreController.StartAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            CrashLogger.Log(ex, "DashboardViewModel: Save network");
+            await _dialogService.ShowErrorAsync("Network Settings Failed", ex.Message);
+            LoadNetworkSettings();
         }
     }
 
@@ -154,22 +207,20 @@ public partial class DashboardViewModel : ObservableObject
 
     private void OnTrafficUpdated(object? sender, TrafficSnapshot snapshot)
     {
-        Dispatch(() =>
+        _latestTraffic = snapshot;
+        if (_isActive)
         {
-            UploadSpeed = FormatSpeed(snapshot.UploadBytesPerSecond);
-            DownloadSpeed = FormatSpeed(snapshot.DownloadBytesPerSecond);
-        });
+            QueueTrafficUiUpdate();
+        }
     }
 
     private void OnStatusUpdated(object? sender, ConnectionStatusSnapshot snapshot)
     {
-        Dispatch(() =>
+        _latestStatus = snapshot;
+        if (_isActive)
         {
-            ActiveNode = snapshot.ActiveNode;
-            CurrentAddress = string.IsNullOrWhiteSpace(snapshot.CurrentAddress) ? "Unknown" : snapshot.CurrentAddress;
-            UploadTotal = FormatBytes(snapshot.UploadTotal);
-            DownloadTotal = FormatBytes(snapshot.DownloadTotal);
-        });
+            QueueStatusUiUpdate();
+        }
     }
 
     private void LoadNetworkSettings()
@@ -190,7 +241,145 @@ public partial class DashboardViewModel : ObservableObject
             return;
         }
 
-        Application.Current.Dispatcher.Invoke(action);
+        Application.Current.Dispatcher.BeginInvoke(action, System.Windows.Threading.DispatcherPriority.Background);
+    }
+
+    public void OnPageActivated()
+    {
+        if (_isActive)
+        {
+            return;
+        }
+
+        _isActive = true;
+
+        try
+        {
+            _trafficMonitorService.TrafficUpdated -= OnTrafficUpdated;
+            _trafficMonitorService.TrafficUpdated += OnTrafficUpdated;
+            _trafficMonitorService.Start();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _connectionMonitorService.StatusUpdated -= OnStatusUpdated;
+            _connectionMonitorService.StatusUpdated += OnStatusUpdated;
+            _connectionMonitorService.Start();
+        }
+        catch
+        {
+        }
+
+        QueueTrafficUiUpdate();
+        QueueStatusUiUpdate();
+    }
+
+    public void OnPageDeactivated()
+    {
+        if (!_isActive)
+        {
+            return;
+        }
+
+        _isActive = false;
+
+        try
+        {
+            _trafficMonitorService.TrafficUpdated -= OnTrafficUpdated;
+            _trafficMonitorService.Stop();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _connectionMonitorService.StatusUpdated -= OnStatusUpdated;
+            _connectionMonitorService.Stop();
+        }
+        catch
+        {
+        }
+    }
+
+    private void QueueTrafficUiUpdate()
+    {
+        if (Interlocked.Exchange(ref _trafficUiQueued, 1) == 1)
+        {
+            return;
+        }
+
+        Dispatch(() =>
+        {
+            try
+            {
+                var snapshot = _latestTraffic;
+                UploadSpeed = FormatSpeed(snapshot.UploadBytesPerSecond);
+                DownloadSpeed = FormatSpeed(snapshot.DownloadBytesPerSecond);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _trafficUiQueued, 0);
+            }
+        });
+    }
+
+    private void QueueStatusUiUpdate()
+    {
+        if (Interlocked.Exchange(ref _statusUiQueued, 1) == 1)
+        {
+            return;
+        }
+
+        Dispatch(() =>
+        {
+            try
+            {
+                var snapshot = _latestStatus;
+                ActiveNode = snapshot.ActiveNode;
+                ActiveProfile = ResolveActiveProfile(snapshot.ActiveNode);
+                CurrentAddress = string.IsNullOrWhiteSpace(snapshot.CurrentAddress) ? "Unknown" : snapshot.CurrentAddress;
+                UploadTotal = FormatBytes(snapshot.UploadTotal);
+                DownloadTotal = FormatBytes(snapshot.DownloadTotal);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _statusUiQueued, 0);
+            }
+        });
+    }
+
+    private string ResolveActiveProfile(string activeNode)
+    {
+        if (string.IsNullOrWhiteSpace(activeNode)
+            || activeNode.Equals("DIRECT", StringComparison.OrdinalIgnoreCase)
+            || activeNode.Equals("REJECT", StringComparison.OrdinalIgnoreCase)
+            || activeNode.Equals("GLOBAL", StringComparison.OrdinalIgnoreCase)
+            || activeNode.Equals(RoutingDefaults.FlatModeSelectionGroup, StringComparison.OrdinalIgnoreCase))
+        {
+            return "None";
+        }
+
+        try
+        {
+            var node = _proxyCatalogStore.LoadNodes()
+                .FirstOrDefault(item => item.Name.Equals(activeNode, StringComparison.OrdinalIgnoreCase));
+            if (node is null || string.IsNullOrWhiteSpace(node.SourceId))
+            {
+                return "None";
+            }
+
+            var profile = _subscriptionStore.Load()
+                .FirstOrDefault(item => item.Id.Equals(node.SourceId, StringComparison.OrdinalIgnoreCase));
+            return string.IsNullOrWhiteSpace(profile?.Name) ? "None" : profile.Name;
+        }
+        catch
+        {
+            return "None";
+        }
     }
 
     private static string FormatSpeed(long bytesPerSecond)
@@ -198,14 +387,26 @@ public partial class DashboardViewModel : ObservableObject
         return FormatBytes(bytesPerSecond) + "/s";
     }
 
-    private static string ResolveCorePath(string configuredPath)
+    private async Task<bool> RequestElevationForTunAsync()
     {
-        if (Path.IsPathRooted(configuredPath))
+        var confirmed = await _dialogService.ShowConfirmAsync(
+            "TUN Requires Administrator",
+            "TUN 模式需要管理员权限。是否立即以管理员权限重启应用？");
+
+        if (!confirmed)
         {
-            return configuredPath;
+            return false;
         }
 
-        return Path.Combine(AppContext.BaseDirectory, configuredPath);
+        if (ElevationHelper.TryRestartAsAdministrator())
+        {
+            return true;
+        }
+
+        await _dialogService.ShowErrorAsync(
+            "Elevation Failed",
+            "无法以管理员权限重启应用。请手动右键“以管理员身份运行”。");
+        return false;
     }
 
     private static string FormatBytes(long bytes)

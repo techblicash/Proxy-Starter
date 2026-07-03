@@ -1,16 +1,20 @@
 ﻿using System.Collections.ObjectModel;
 using System.Linq;
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Threading.Tasks;
 using System;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ProxyStarter.App.Helpers;
 using ProxyStarter.App.Models;
 using ProxyStarter.App.Services;
 
 namespace ProxyStarter.App.ViewModels;
 
-public partial class ProfilesViewModel : ObservableObject
+public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
 {
     private readonly SubscriptionStore _subscriptionStore;
     private readonly SubscriptionService _subscriptionService;
@@ -20,6 +24,9 @@ public partial class ProfilesViewModel : ObservableObject
     private readonly AppSettingsStore _settingsStore;
     private readonly IDialogService _dialogService;
     private readonly DispatcherTimer _activeTimer;
+    private readonly HashSet<SubscriptionProfile> _attachedProfiles = new(ReferenceEqualityComparer.Instance);
+    private bool _isActive;
+    private bool _suppressProfilePersistence;
 
     [ObservableProperty]
     private SubscriptionProfile? _selectedProfile;
@@ -43,15 +50,18 @@ public partial class ProfilesViewModel : ObservableObject
         _settingsStore = settingsStore;
         _dialogService = dialogService;
         Profiles = new ObservableCollection<SubscriptionProfile>(_subscriptionStore.Load());
+        Profiles.CollectionChanged += OnProfilesCollectionChanged;
+        foreach (var profile in Profiles)
+        {
+            AttachProfile(profile);
+        }
 
         _activeTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromSeconds(3)
         };
         _activeTimer.Tick += async (_, _) => await UpdateActiveProfileAsync();
-        _activeTimer.Start();
-
-        _ = UpdateActiveProfileAsync();
+        // Timer runs only while the Profiles page is visible.
     }
 
     [RelayCommand]
@@ -72,19 +82,15 @@ public partial class ProfilesViewModel : ObservableObject
         }
 
         Profiles.Add(profile);
-        _subscriptionStore.Save(Profiles.ToList());
+        PersistProfiles(rebuildCatalog: false);
 
         try
         {
             await _subscriptionService.RefreshProfileAsync(profile);
-            _subscriptionStore.Save(Profiles.ToList());
+            PersistProfiles(rebuildCatalog: false);
             _subscriptionService.RebuildCatalogFromCache(Profiles);
 
-            Profiles.Clear();
-            foreach (var saved in _subscriptionStore.Load())
-            {
-                Profiles.Add(saved);
-            }
+            ReplaceProfiles(_subscriptionStore.Load());
 
             await UpdateActiveProfileAsync();
             await _dialogService.ShowInfoAsync("Subscription Added", $"Fetched {profile.NodeCount} nodes.");
@@ -120,7 +126,7 @@ public partial class ProfilesViewModel : ObservableObject
         try
         {
             await _subscriptionService.RefreshProfileAsync(SelectedProfile);
-            _subscriptionStore.Save(Profiles.ToList());
+            PersistProfiles(rebuildCatalog: false);
             _subscriptionService.RebuildCatalogFromCache(Profiles);
             await UpdateActiveProfileAsync();
 
@@ -158,13 +164,20 @@ public partial class ProfilesViewModel : ObservableObject
             return;
         }
 
-        SelectedProfile.Name = updated.Name;
-        SelectedProfile.Url = updated.Url;
-        SelectedProfile.AutoUpdateEnabled = updated.AutoUpdateEnabled;
-        SelectedProfile.AutoUpdateIntervalMinutes = updated.AutoUpdateIntervalMinutes;
+        _suppressProfilePersistence = true;
+        try
+        {
+            SelectedProfile.Name = updated.Name;
+            SelectedProfile.Url = updated.Url;
+            SelectedProfile.AutoUpdateEnabled = updated.AutoUpdateEnabled;
+            SelectedProfile.AutoUpdateIntervalMinutes = updated.AutoUpdateIntervalMinutes;
+        }
+        finally
+        {
+            _suppressProfilePersistence = false;
+        }
 
-        _subscriptionStore.Save(Profiles.ToList());
-        _subscriptionService.RebuildCatalogFromCache(Profiles);
+        PersistProfiles(rebuildCatalog: true);
         await UpdateActiveProfileAsync();
     }
 
@@ -215,8 +228,7 @@ public partial class ProfilesViewModel : ObservableObject
                 }
             }
 
-            _subscriptionStore.Save(Profiles.ToList());
-            _subscriptionService.RebuildCatalogFromCache(Profiles);
+            PersistProfiles(rebuildCatalog: true);
             await UpdateActiveProfileAsync();
         }
         catch (Exception ex)
@@ -241,11 +253,7 @@ public partial class ProfilesViewModel : ObservableObject
     private async Task RefreshAllAsync()
     {
         await _subscriptionService.RefreshAllAsync();
-        Profiles.Clear();
-        foreach (var profile in _subscriptionStore.Load())
-        {
-            Profiles.Add(profile);
-        }
+        ReplaceProfiles(_subscriptionStore.Load());
 
         await UpdateActiveProfileAsync();
     }
@@ -253,8 +261,7 @@ public partial class ProfilesViewModel : ObservableObject
     [RelayCommand]
     private void SaveProfiles()
     {
-        _subscriptionStore.Save(Profiles.ToList());
-        _subscriptionService.RebuildCatalogFromCache(Profiles);
+        PersistProfiles(rebuildCatalog: true);
     }
 
     [RelayCommand]
@@ -273,18 +280,111 @@ public partial class ProfilesViewModel : ObservableObject
         }
 
         Profiles.Remove(SelectedProfile);
-        _subscriptionStore.Save(Profiles.ToList());
-        _subscriptionService.RebuildCatalogFromCache(Profiles);
+        PersistProfiles(rebuildCatalog: true);
         await UpdateActiveProfileAsync();
+    }
+
+    private void OnProfilesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.OldItems is not null)
+        {
+            foreach (var item in e.OldItems.OfType<SubscriptionProfile>())
+            {
+                DetachProfile(item);
+            }
+        }
+
+        if (e.NewItems is not null)
+        {
+            foreach (var item in e.NewItems.OfType<SubscriptionProfile>())
+            {
+                AttachProfile(item);
+            }
+        }
+    }
+
+    private void AttachProfile(SubscriptionProfile profile)
+    {
+        if (_attachedProfiles.Add(profile))
+        {
+            profile.PropertyChanged += OnProfilePropertyChanged;
+        }
+    }
+
+    private void DetachProfile(SubscriptionProfile profile)
+    {
+        if (_attachedProfiles.Remove(profile))
+        {
+            profile.PropertyChanged -= OnProfilePropertyChanged;
+        }
+    }
+
+    private void OnProfilePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_suppressProfilePersistence)
+        {
+            return;
+        }
+
+        if (e.PropertyName is nameof(SubscriptionProfile.IsEnabled)
+            or nameof(SubscriptionProfile.AutoUpdateEnabled)
+            or nameof(SubscriptionProfile.AutoUpdateIntervalMinutes)
+            or nameof(SubscriptionProfile.Name)
+            or nameof(SubscriptionProfile.Url))
+        {
+            PersistProfiles(rebuildCatalog: true);
+        }
+    }
+
+    private void PersistProfiles(bool rebuildCatalog)
+    {
+        if (_suppressProfilePersistence)
+        {
+            return;
+        }
+
+        _subscriptionStore.Save(Profiles.ToList());
+        if (rebuildCatalog)
+        {
+            _subscriptionService.RebuildCatalogFromCache(Profiles);
+        }
+    }
+
+    private void ReplaceProfiles(IEnumerable<SubscriptionProfile> profiles)
+    {
+        _suppressProfilePersistence = true;
+        try
+        {
+            foreach (var profile in _attachedProfiles.ToList())
+            {
+                DetachProfile(profile);
+            }
+
+            Profiles.Clear();
+            foreach (var profile in profiles)
+            {
+                Profiles.Add(profile);
+            }
+        }
+        finally
+        {
+            _suppressProfilePersistence = false;
+        }
     }
 
     private async Task UpdateActiveProfileAsync()
     {
-        var groupName = _settingsStore.Settings.SelectionGroup;
+        if (!_isActive)
+        {
+            return;
+        }
+
+        var settings = _settingsStore.Settings;
+        var groupName = RoutingDefaults.ResolveSelectionGroup(settings.SelectionGroup, settings.UseSubscriptionPolicyGroups);
         string? activeNode = null;
         try
         {
-            activeNode = await _apiClient.GetSelectedProxyAsync(groupName);
+            activeNode = await _apiClient.GetResolvedSelectedProxyAsync(groupName);
         }
         catch
         {
@@ -310,5 +410,23 @@ public partial class ProfilesViewModel : ObservableObject
             profile.IsActive = !string.IsNullOrWhiteSpace(activeProfileId)
                                && string.Equals(profile.Id, activeProfileId, StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    public void OnPageActivated()
+    {
+        if (_isActive)
+        {
+            return;
+        }
+
+        _isActive = true;
+        _activeTimer.Start();
+        _ = UpdateActiveProfileAsync();
+    }
+
+    public void OnPageDeactivated()
+    {
+        _isActive = false;
+        _activeTimer.Stop();
     }
 }

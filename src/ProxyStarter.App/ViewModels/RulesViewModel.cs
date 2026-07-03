@@ -43,8 +43,17 @@ public partial class RulesViewModel : ObservableObject
     [RelayCommand]
     private async Task SaveModeAsync()
     {
-        _settingsStore.Settings.Mode = SelectedMode;
-        _settingsStore.Save();
+        try
+        {
+            _settingsStore.Settings.Mode = SelectedMode;
+            _settingsStore.Save();
+        }
+        catch (System.Exception ex)
+        {
+            CrashLogger.Log(ex, "RulesViewModel: Save mode");
+            await _dialogService.ShowErrorAsync("Mode Save Failed", ex.Message);
+            return;
+        }
 
         var ok = await _apiClient.SetModeAsync(SelectedMode);
         if (!ok)

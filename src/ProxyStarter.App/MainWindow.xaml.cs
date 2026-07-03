@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Runtime.InteropServices;
@@ -8,7 +8,6 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
-using Microsoft.Extensions.DependencyInjection;
 using ProxyStarter.App.Helpers;
 using ProxyStarter.App.Services;
 using ProxyStarter.App.ViewModels;
@@ -29,6 +28,9 @@ public partial class MainWindow : FluentWindow
     private readonly MainWindowViewModel _viewModel;
     private readonly INavigationService _navigationService;
     private readonly LocalizationService _localizationService;
+    private readonly MihomoApiClient _apiClient;
+    private readonly AppSettingsStore _settingsStore;
+    private readonly ProxyCatalogStore _proxyCatalogStore;
 
     private Forms.NotifyIcon? _notifyIcon;
     private Views.TrayMenuWindow? _trayMenuWindow;
@@ -37,11 +39,17 @@ public partial class MainWindow : FluentWindow
         MainWindowViewModel viewModel,
         INavigationService navigationService,
         INavigationViewPageProvider pageProvider,
-        LocalizationService localizationService)
+        LocalizationService localizationService,
+        MihomoApiClient apiClient,
+        AppSettingsStore settingsStore,
+        ProxyCatalogStore proxyCatalogStore)
     {
         _viewModel = viewModel;
         _navigationService = navigationService;
         _localizationService = localizationService;
+        _apiClient = apiClient;
+        _settingsStore = settingsStore;
+        _proxyCatalogStore = proxyCatalogStore;
 
         InitializeComponent();
         DataContext = _viewModel;
@@ -444,10 +452,7 @@ public partial class MainWindow : FluentWindow
         var cursorX = cursor.X / scale;
         var cursorY = cursor.Y / scale;
 
-        var menuWindow = new Views.TrayMenuWindow(
-            _viewModel,
-            App.Services.GetRequiredService<MihomoApiClient>(),
-            App.Services.GetRequiredService<AppSettingsStore>())
+        var menuWindow = new Views.TrayMenuWindow(_viewModel, _apiClient, _settingsStore, _proxyCatalogStore)
         {
             Topmost = true,
             ShowInTaskbar = false,
@@ -464,30 +469,35 @@ public partial class MainWindow : FluentWindow
         };
 
         var width = menuWindow.Width;
-        var height = menuWindow.Height;
+        if (double.IsNaN(width) || width <= 0)
+        {
+            width = menuWindow.MinWidth > 0 ? menuWindow.MinWidth : 360;
+        }
 
-        var left = cursorX;
-        var top = cursorY;
+        var height = menuWindow.Height;
+        if (double.IsNaN(height) || height <= 0)
+        {
+            height = menuWindow.MinHeight > 0 ? menuWindow.MinHeight : 520;
+        }
+
+        const double offset = 8;
+        var left = cursorX + offset;
+        var top = cursorY + offset;
 
         if (left + width > workingRight)
         {
-            left = workingRight - width;
+            left = cursorX - width - offset;
         }
 
         if (top + height > workingBottom)
         {
-            top = workingBottom - height;
+            top = cursorY - height - offset;
         }
 
-        if (left < workingLeft)
-        {
-            left = workingLeft;
-        }
-
-        if (top < workingTop)
-        {
-            top = workingTop;
-        }
+        var maxLeft = Math.Max(workingLeft, workingRight - width);
+        var maxTop = Math.Max(workingTop, workingBottom - height);
+        left = Math.Clamp(left, workingLeft, maxLeft);
+        top = Math.Clamp(top, workingTop, maxTop);
 
         menuWindow.Left = left;
         menuWindow.Top = top;
@@ -527,31 +537,20 @@ public partial class MainWindow : FluentWindow
     {
         try
         {
-            var streamInfo = Application.GetResourceStream(new Uri("pack://application:,,,/Assets/AppIcon.png", UriKind.Absolute));
+            var streamInfo = Application.GetResourceStream(new Uri("pack://application:,,,/ProxyStarter.ico", UriKind.Absolute));
             if (streamInfo?.Stream is null)
             {
                 return SystemIcons.Application;
             }
 
-            using var bitmap = new Bitmap(streamInfo.Stream);
-            var handle = bitmap.GetHicon();
-            try
-            {
-                return (System.Drawing.Icon)System.Drawing.Icon.FromHandle(handle).Clone();
-            }
-            finally
-            {
-                DestroyIcon(handle);
-            }
+            using var icon = new System.Drawing.Icon(streamInfo.Stream);
+            return (System.Drawing.Icon)icon.Clone();
         }
         catch
         {
             return SystemIcons.Application;
         }
     }
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool DestroyIcon(IntPtr hIcon);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool ReleaseCapture();
@@ -567,6 +566,7 @@ public partial class MainWindow : FluentWindow
             return;
         }
 
-        Dispatcher.Invoke(action);
+        Dispatcher.BeginInvoke(action, DispatcherPriority.Background);
     }
 }
+

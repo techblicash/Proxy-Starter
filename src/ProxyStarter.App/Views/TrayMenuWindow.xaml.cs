@@ -1,10 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Input;
 using ProxyStarter.App.Models;
 using ProxyStarter.App.Services;
 using ProxyStarter.App.ViewModels;
@@ -18,33 +18,43 @@ public partial class TrayMenuWindow : FluentWindow
     private readonly MainWindowViewModel _viewModel;
     private readonly MihomoApiClient _apiClient;
     private readonly AppSettingsStore _settingsStore;
+    private readonly ProxyCatalogStore _proxyCatalogStore;
 
     private readonly List<ProxyNode> _allNodes = new();
     private readonly ObservableCollection<ProxyNode> _filteredNodes = new();
-    private bool _suppressSelection;
 
-    public TrayMenuWindow(MainWindowViewModel viewModel, MihomoApiClient apiClient, AppSettingsStore settingsStore)
+    private bool _suppressSelection;
+    private bool _isLoading;
+    private string _currentSelectionGroup = string.Empty;
+
+    public TrayMenuWindow(
+        MainWindowViewModel viewModel,
+        MihomoApiClient apiClient,
+        AppSettingsStore settingsStore,
+        ProxyCatalogStore proxyCatalogStore)
     {
         _viewModel = viewModel;
         _apiClient = apiClient;
         _settingsStore = settingsStore;
+        _proxyCatalogStore = proxyCatalogStore;
+
         InitializeComponent();
         DataContext = _viewModel;
-
         NodesList.ItemsSource = _filteredNodes;
 
         Loaded += async (_, _) =>
         {
             ApplicationThemeManager.Apply(this);
-            await LoadNodesAsync();
+            await LoadNodesAsync().ConfigureAwait(true);
         };
+
         Deactivated += (_, _) => Close();
         PreviewKeyDown += OnPreviewKeyDown;
     }
 
     private void OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
+        if (e.Key == System.Windows.Input.Key.Escape)
         {
             Close();
         }
@@ -58,7 +68,11 @@ public partial class TrayMenuWindow : FluentWindow
 
     private void OnToggleCoreClicked(object sender, RoutedEventArgs e)
     {
-        _viewModel.ToggleCoreCommand.Execute(null);
+        if (_viewModel.ToggleCoreCommand.CanExecute(null))
+        {
+            _viewModel.ToggleCoreCommand.Execute(null);
+        }
+
         Close();
     }
 
@@ -68,31 +82,55 @@ public partial class TrayMenuWindow : FluentWindow
         Close();
     }
 
+    private async void OnRefreshNodesClicked(object sender, RoutedEventArgs e)
+    {
+        await LoadNodesAsync().ConfigureAwait(true);
+    }
+
     private async Task LoadNodesAsync()
     {
-        NodesStatusText.Text = string.Empty;
+        if (_isLoading)
+        {
+            return;
+        }
+
+        _isLoading = true;
+        NodesStatusText.Text = "Loading...";
         _allNodes.Clear();
         _filteredNodes.Clear();
 
-        var groupName = _settingsStore.Settings.SelectionGroup;
+        var settings = _settingsStore.Settings;
+        var groupName = RoutingDefaults.ResolveSelectionGroup(settings.SelectionGroup, settings.UseSubscriptionPolicyGroups);
+        _currentSelectionGroup = groupName;
+        NodesGroupText.Text = string.IsNullOrWhiteSpace(groupName) ? "" : groupName;
         if (string.IsNullOrWhiteSpace(groupName))
         {
+            NodesStatusText.Text = "Selection group is empty";
+            _isLoading = false;
             return;
         }
 
         try
         {
-            var snapshot = await _apiClient.GetProxiesAsync();
-            if (snapshot is null
-                || !snapshot.Proxies.TryGetValue(groupName, out var group)
-                || group.All.Count == 0)
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            var snapshot = await _apiClient.GetProxiesAsync(timeout.Token).ConfigureAwait(true);
+            if (snapshot is null)
             {
-                NodesStatusText.Text = GetString("Text_Stopped", "Stopped");
+                LoadLocalNodes("Core API unavailable");
                 return;
             }
 
-            var active = group.Now;
-            foreach (var name in group.All.Where(n => !string.IsNullOrWhiteSpace(n)))
+            if (!TryResolveGroup(snapshot, groupName, out var actualGroupName, out var group) || group.All.Count == 0)
+            {
+                LoadLocalNodes("Core group unavailable");
+                return;
+            }
+
+            _currentSelectionGroup = actualGroupName;
+            NodesGroupText.Text = actualGroupName;
+            var active = await _apiClient.GetResolvedSelectedProxyAsync(actualGroupName, timeout.Token).ConfigureAwait(true);
+            active ??= group.Now;
+            foreach (var name in group.All.Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 _allNodes.Add(new ProxyNode
                 {
@@ -102,8 +140,98 @@ public partial class TrayMenuWindow : FluentWindow
             }
 
             ApplyFilter(NodeSearchBox.Text);
+            NodesStatusText.Text = $"{_allNodes.Count} nodes";
+        }
+        catch
+        {
+            LoadLocalNodes("Core API unavailable");
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
 
-            NodesStatusText.Text = $"{groupName} · {_allNodes.Count}";
+    private bool TryResolveGroup(
+        MihomoProxiesSnapshot snapshot,
+        string requestedGroup,
+        out string groupName,
+        out MihomoProxy group)
+    {
+        foreach (var candidate in BuildGroupCandidates(snapshot, requestedGroup))
+        {
+            if (snapshot.Proxies.TryGetValue(candidate, out var candidateGroup) && candidateGroup.All.Count > 0)
+            {
+                groupName = candidate;
+                group = candidateGroup;
+                return true;
+            }
+        }
+
+        groupName = string.Empty;
+        group = new MihomoProxy(string.Empty, string.Empty, null, Array.Empty<string>());
+        return false;
+    }
+
+    private IEnumerable<string> BuildGroupCandidates(MihomoProxiesSnapshot snapshot, string requestedGroup)
+    {
+        var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        bool Yield(string value)
+        {
+            return !string.IsNullOrWhiteSpace(value) && yielded.Add(value);
+        }
+
+        if (Yield(requestedGroup))
+        {
+            yield return requestedGroup;
+        }
+
+        var configured = _settingsStore.Settings.SelectionGroup;
+        if (Yield(configured))
+        {
+            yield return configured;
+        }
+
+        if (Yield(RoutingDefaults.FlatModeSelectionGroup))
+        {
+            yield return RoutingDefaults.FlatModeSelectionGroup;
+        }
+
+        if (Yield("GLOBAL"))
+        {
+            yield return "GLOBAL";
+        }
+
+        foreach (var group in snapshot.Proxies.Values
+                     .Where(proxy => proxy.All.Count > 0)
+                     .OrderByDescending(proxy => proxy.Type.Equals("Selector", StringComparison.OrdinalIgnoreCase))
+                     .ThenBy(proxy => proxy.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            if (Yield(group.Name))
+            {
+                yield return group.Name;
+            }
+        }
+    }
+
+    private void LoadLocalNodes(string reason)
+    {
+        try
+        {
+            var nodes = _proxyCatalogStore.LoadNodes()
+                .Where(node => !string.IsNullOrWhiteSpace(node.Name))
+                .GroupBy(node => node.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToList();
+
+            foreach (var node in nodes)
+            {
+                _allNodes.Add(node);
+            }
+
+            ApplyFilter(NodeSearchBox.Text);
+            NodesStatusText.Text = nodes.Count > 0 ? $"{nodes.Count} local nodes ({reason})" : reason;
         }
         catch
         {
@@ -116,17 +244,13 @@ public partial class TrayMenuWindow : FluentWindow
         query = (query ?? string.Empty).Trim();
         _filteredNodes.Clear();
 
-        if (string.IsNullOrWhiteSpace(query))
+        IEnumerable<ProxyNode> source = _allNodes;
+        if (!string.IsNullOrWhiteSpace(query))
         {
-            foreach (var node in _allNodes)
-            {
-                _filteredNodes.Add(node);
-            }
-
-            return;
+            source = source.Where(node => node.Name.Contains(query, StringComparison.OrdinalIgnoreCase));
         }
 
-        foreach (var node in _allNodes.Where(n => n.Name.Contains(query, StringComparison.OrdinalIgnoreCase)))
+        foreach (var node in source)
         {
             _filteredNodes.Add(node);
         }
@@ -155,7 +279,11 @@ public partial class TrayMenuWindow : FluentWindow
             return;
         }
 
-        var groupName = _settingsStore.Settings.SelectionGroup;
+        var groupName = string.IsNullOrWhiteSpace(_currentSelectionGroup)
+            ? RoutingDefaults.ResolveSelectionGroup(
+                _settingsStore.Settings.SelectionGroup,
+                _settingsStore.Settings.UseSubscriptionPolicyGroups)
+            : _currentSelectionGroup;
         if (string.IsNullOrWhiteSpace(groupName))
         {
             Close();
@@ -165,7 +293,8 @@ public partial class TrayMenuWindow : FluentWindow
         _suppressSelection = true;
         try
         {
-            var success = await _apiClient.SetProxySelectionAsync(groupName, node.Name);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var success = await _apiClient.SetProxySelectionAsync(groupName, node.Name, timeout.Token).ConfigureAwait(true);
             if (!success)
             {
                 return;
@@ -175,6 +304,10 @@ public partial class TrayMenuWindow : FluentWindow
             {
                 item.IsActive = string.Equals(item.Name, node.Name, StringComparison.OrdinalIgnoreCase);
             }
+        }
+        catch (Exception ex)
+        {
+            CrashLogger.Log(ex, "TrayMenuWindow: Select node");
         }
         finally
         {

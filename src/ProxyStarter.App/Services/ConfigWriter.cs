@@ -12,23 +12,26 @@ public sealed class ConfigWriter
 {
     private readonly ProxyCatalogStore _proxyCatalogStore;
     private readonly RulesStore _rulesStore;
+    private readonly DefaultRulesService _defaultRulesService;
     private readonly ISerializer _serializer;
 
-    public ConfigWriter(ProxyCatalogStore proxyCatalogStore, RulesStore rulesStore)
+    public ConfigWriter(
+        ProxyCatalogStore proxyCatalogStore,
+        RulesStore rulesStore,
+        DefaultRulesService defaultRulesService)
     {
         _proxyCatalogStore = proxyCatalogStore;
         _rulesStore = rulesStore;
+        _defaultRulesService = defaultRulesService;
         _serializer = new SerializerBuilder().Build();
     }
 
     public string EnsureConfig(AppSettings settings)
     {
-        Directory.CreateDirectory(AppPaths.DataDirectory);
-
         var configPath = ResolvePath(settings.ConfigPath, AppPaths.DataDirectory);
         var content = BuildConfig(settings);
 
-        File.WriteAllText(configPath, content, new UTF8Encoding(false));
+        AtomicFile.WriteAllText(configPath, content, new UTF8Encoding(false));
         return configPath;
     }
 
@@ -44,8 +47,12 @@ public sealed class ConfigWriter
             }
         }
 
-        var selectionGroup = settings.SelectionGroup;
-        var groups = BuildProxyGroups(selectionGroup, proxyNames);
+        var useSubscriptionPolicyGroups = settings.UseSubscriptionPolicyGroups;
+        var selectionGroup = RoutingDefaults.ResolveSelectionGroup(settings.SelectionGroup, useSubscriptionPolicyGroups);
+        var groups = BuildProxyGroups(selectionGroup, proxyNames, useSubscriptionPolicyGroups);
+        var ruleProviders = useSubscriptionPolicyGroups
+            ? _proxyCatalogStore.LoadRuleProviders()
+            : new Dictionary<string, object>(System.StringComparer.OrdinalIgnoreCase);
 
         var config = new Dictionary<string, object>
         {
@@ -69,19 +76,20 @@ public sealed class ConfigWriter
                 ["enable"] = settings.TunEnabled,
                 ["stack"] = "system",
                 ["auto-route"] = true,
-                ["auto-detect-interface"] = true
+                ["auto-detect-interface"] = true,
+                ["strict-route"] = true,
+                ["dns-hijack"] = new[] { "any:53" }
             },
-            ["dns"] = new Dictionary<string, object>
-            {
-                ["enable"] = true,
-                ["listen"] = "0.0.0.0:1053",
-                ["enhanced-mode"] = "fake-ip",
-                ["nameserver"] = new[] { "223.5.5.5", "1.1.1.1" }
-            },
+            ["dns"] = MihomoDnsConfig.Build(),
             ["proxies"] = proxies,
             ["proxy-groups"] = groups,
-            ["rules"] = BuildRules(settings)
+            ["rules"] = BuildRules(settings, selectionGroup, useSubscriptionPolicyGroups)
         };
+
+        if (ruleProviders.Count > 0)
+        {
+            config["rule-providers"] = ruleProviders;
+        }
 
         if (!string.IsNullOrWhiteSpace(settings.ApiSecret))
         {
@@ -91,26 +99,32 @@ public sealed class ConfigWriter
         return _serializer.Serialize(config);
     }
 
-    private List<Dictionary<string, object>> BuildProxyGroups(string selectionGroup, List<string> proxyNames)
+    private List<Dictionary<string, object>> BuildProxyGroups(
+        string selectionGroup,
+        List<string> proxyNames,
+        bool useSubscriptionPolicyGroups)
     {
         var groups = new List<Dictionary<string, object>>();
         var seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 
-        foreach (var group in _proxyCatalogStore.LoadProxyGroups())
+        if (useSubscriptionPolicyGroups)
         {
-            var sanitized = SanitizeGroup(group, proxyNames);
-            if (sanitized is null)
+            foreach (var group in _proxyCatalogStore.LoadProxyGroups())
             {
-                continue;
-            }
+                var sanitized = SanitizeGroup(group, proxyNames);
+                if (sanitized is null)
+                {
+                    continue;
+                }
 
-            var name = sanitized.TryGetValue("name", out var nameValue) ? nameValue?.ToString() ?? string.Empty : string.Empty;
-            if (string.IsNullOrWhiteSpace(name) || !seen.Add(name))
-            {
-                continue;
-            }
+                var name = sanitized.TryGetValue("name", out var nameValue) ? nameValue?.ToString() ?? string.Empty : string.Empty;
+                if (string.IsNullOrWhiteSpace(name) || !seen.Add(name))
+                {
+                    continue;
+                }
 
-            groups.Add(sanitized);
+                groups.Add(sanitized);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(selectionGroup) && !seen.Contains(selectionGroup))
@@ -216,14 +230,25 @@ public sealed class ConfigWriter
         return list;
     }
 
-    private List<string> BuildRules(AppSettings settings)
+    private List<string> BuildRules(AppSettings settings, string selectionGroup, bool useSubscriptionPolicyGroups)
     {
-        var selectionGroup = settings.SelectionGroup;
         var rules = _rulesStore.LoadRules().ToList();
+        if (rules.Count == 0)
+        {
+            rules = useSubscriptionPolicyGroups
+                ? _proxyCatalogStore.LoadRules().ToList()
+                : _defaultRulesService.GetDefaultRules(selectionGroup).ToList();
+        }
+
         var blockedRules = BuildBlockedRules(settings.BlockedSites);
         if (blockedRules.Count > 0)
         {
             rules.InsertRange(0, blockedRules);
+        }
+
+        if (!useSubscriptionPolicyGroups)
+        {
+            rules = NormalizeRulesForFlatMode(rules, selectionGroup);
         }
 
         if (rules.Count == 0)
@@ -238,6 +263,48 @@ public sealed class ConfigWriter
         }
 
         return rules;
+    }
+
+    private static List<string> NormalizeRulesForFlatMode(List<string> rules, string selectionGroup)
+    {
+        var normalized = new List<string>(rules.Count);
+        foreach (var raw in rules)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            var parts = raw.Split(',');
+            if (parts.Length < 2)
+            {
+                normalized.Add(raw);
+                continue;
+            }
+
+            var head = parts[0].Trim();
+            var policyIndex = head.Equals("MATCH", System.StringComparison.OrdinalIgnoreCase) ? 1 : 2;
+            if (policyIndex >= parts.Length)
+            {
+                normalized.Add(raw);
+                continue;
+            }
+
+            var policy = parts[policyIndex].Trim();
+            var keepPolicy =
+                policy.Equals("DIRECT", System.StringComparison.OrdinalIgnoreCase)
+                || policy.Equals("REJECT", System.StringComparison.OrdinalIgnoreCase)
+                || policy.Equals(selectionGroup, System.StringComparison.Ordinal);
+
+            if (!keepPolicy)
+            {
+                parts[policyIndex] = selectionGroup;
+            }
+
+            normalized.Add(string.Join(",", parts));
+        }
+
+        return normalized;
     }
 
     private static List<string> BuildBlockedRules(string? blockedSites)
@@ -330,4 +397,5 @@ public sealed class ConfigWriter
 
         return Path.Combine(fallbackDirectory, path);
     }
+
 }

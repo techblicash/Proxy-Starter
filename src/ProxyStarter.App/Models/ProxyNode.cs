@@ -53,6 +53,7 @@ public sealed partial class ProxyNode : ObservableObject
             "hysteria" => "Hysteria",
             "hysteria2" => "Hysteria2",
             "tuic" => "TUIC",
+            "anytls" => "AnyTLS",
             _ => type
         };
     }

@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using ProxyStarter.App.Helpers;
 using ProxyStarter.App.ViewModels;
 
 namespace ProxyStarter.App.Views;
@@ -12,13 +13,16 @@ public partial class ProfilesPage : Page
     {
         InitializeComponent();
         DataContext = viewModel;
+
+        Loaded += (_, _) => (DataContext as IPageLifecycleAware)?.OnPageActivated();
+        Unloaded += (_, _) => (DataContext as IPageLifecycleAware)?.OnPageDeactivated();
     }
 
     private void OnRowEditEnding(object sender, DataGridRowEditEndingEventArgs e)
     {
         if (DataContext is ProfilesViewModel viewModel)
         {
-            viewModel.SaveProfilesCommand.Execute(null);
+            Dispatcher.BeginInvoke(() => viewModel.SaveProfilesCommand.Execute(null), System.Windows.Threading.DispatcherPriority.Background);
         }
     }
 
@@ -29,7 +33,13 @@ public partial class ProfilesPage : Page
             return;
         }
 
-        if (FindAncestor<DataGridRow>(e.OriginalSource as DependencyObject) is null)
+        var source = e.OriginalSource as DependencyObject;
+        if (FindAncestor<System.Windows.Controls.Primitives.ToggleButton>(source) is not null)
+        {
+            return;
+        }
+
+        if (FindAncestor<DataGridRow>(source) is null)
         {
             return;
         }
@@ -51,4 +61,3 @@ public partial class ProfilesPage : Page
         return current as T;
     }
 }
-

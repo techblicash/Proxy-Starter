@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ProxyStarter.App.Helpers;
 using ProxyStarter.App.Services;
 
 namespace ProxyStarter.App.ViewModels;
@@ -12,6 +13,8 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly CoreController _coreController;
     private readonly IWindowService _windowService;
     private readonly LocalizationService _localizationService;
+    private readonly AppSettingsStore _settingsStore;
+    private readonly IDialogService _dialogService;
 
     [ObservableProperty]
     private bool _isCoreRunning;
@@ -24,11 +27,15 @@ public partial class MainWindowViewModel : ObservableObject
     public MainWindowViewModel(
         CoreController coreController,
         IWindowService windowService,
-        LocalizationService localizationService)
+        LocalizationService localizationService,
+        AppSettingsStore settingsStore,
+        IDialogService dialogService)
     {
         _coreController = coreController;
         _windowService = windowService;
         _localizationService = localizationService;
+        _settingsStore = settingsStore;
+        _dialogService = dialogService;
         _isCoreRunning = _coreController.IsRunning;
         UpdateCoreLabel();
 
@@ -53,7 +60,41 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     private async Task ToggleCoreAsync()
     {
-        await _coreController.ToggleAsync();
+        if (!_coreController.IsRunning
+            && _settingsStore.Settings.TunEnabled
+            && !ElevationHelper.IsRunningAsAdministrator())
+        {
+            var confirmed = await _dialogService.ShowConfirmAsync(
+                "TUN Requires Administrator",
+                "TUN 模式需要管理员权限。是否立即以管理员权限重启应用？");
+
+            if (!confirmed)
+            {
+                return;
+            }
+
+            if (ElevationHelper.TryRestartAsAdministrator())
+            {
+                IsExitRequested = true;
+                Application.Current?.Shutdown();
+                return;
+            }
+
+            await _dialogService.ShowErrorAsync(
+                "Elevation Failed",
+                "无法以管理员权限重启应用。请手动右键“以管理员身份运行”。");
+            return;
+        }
+
+        try
+        {
+            await _coreController.ToggleAsync();
+        }
+        catch (Exception ex)
+        {
+            CrashLogger.Log(ex, "MainWindowViewModel: Toggle core");
+            await _dialogService.ShowErrorAsync("Core Operation Failed", ex.Message);
+        }
     }
 
     [RelayCommand]
@@ -78,6 +119,6 @@ public partial class MainWindowViewModel : ObservableObject
             return;
         }
 
-        Application.Current.Dispatcher.Invoke(action);
+        Application.Current.Dispatcher.BeginInvoke(action, System.Windows.Threading.DispatcherPriority.Background);
     }
 }

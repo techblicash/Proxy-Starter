@@ -1,8 +1,10 @@
 using System;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using ProxyStarter.App.Helpers;
 using ProxyStarter.App.ViewModels;
 
 namespace ProxyStarter.App.Views;
@@ -36,6 +38,7 @@ public partial class NodesPage : Page
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        (DataContext as IPageLifecycleAware)?.OnPageActivated();
         UpdateCardsPerRowSafe();
         RestoreScrollOffsetSafe();
     }
@@ -50,9 +53,31 @@ public partial class NodesPage : Page
     {
         _resizeTimer.Stop();
         SaveScrollOffsetSafe();
-        Loaded -= OnLoaded;
-        SizeChanged -= OnSizeChanged;
-        Unloaded -= OnUnloaded;
+        (DataContext as IPageLifecycleAware)?.OnPageDeactivated();
+    }
+
+    private void OnLocateActiveNodeClick(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not NodesViewModel viewModel)
+        {
+            return;
+        }
+
+        var activeNode = viewModel.GetActiveNode();
+        if (activeNode is null)
+        {
+            return;
+        }
+
+        viewModel.SelectedNode = activeNode;
+        var row = viewModel.NodeRows.FirstOrDefault(cardRow => cardRow.Items.Contains(activeNode));
+        if (row is null)
+        {
+            return;
+        }
+
+        NodesList.ScrollIntoView(row);
+        Dispatcher.BeginInvoke(() => NodesList.ScrollIntoView(row), DispatcherPriority.Background);
     }
 
     private void UpdateCardsPerRowSafe()

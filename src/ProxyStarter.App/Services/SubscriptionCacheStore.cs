@@ -22,11 +22,17 @@ public sealed class SubscriptionCacheStore
     private readonly IDeserializer _deserializer;
     private readonly AppSettingsStore _settingsStore;
     private readonly RulesStore _rulesStore;
+    private readonly DefaultRulesService _defaultRulesService;
+    private readonly object _sync = new();
 
-    public SubscriptionCacheStore(AppSettingsStore settingsStore, RulesStore rulesStore)
+    public SubscriptionCacheStore(
+        AppSettingsStore settingsStore,
+        RulesStore rulesStore,
+        DefaultRulesService defaultRulesService)
     {
         _settingsStore = settingsStore;
         _rulesStore = rulesStore;
+        _defaultRulesService = defaultRulesService;
         _cacheDirectory = Path.Combine(AppPaths.DataDirectory, "subscriptions");
         _serializer = new SerializerBuilder().Build();
         _deserializer = new DeserializerBuilder().Build();
@@ -39,25 +45,40 @@ public sealed class SubscriptionCacheStore
             return;
         }
 
-        Try(() => Directory.CreateDirectory(_cacheDirectory), "Create cache directory");
-
-        Try(() =>
+        lock (_sync)
         {
-            var nodesJson = JsonSerializer.Serialize(result.Nodes, Options);
-            File.WriteAllText(GetNodesPath(profileId), nodesJson, new UTF8Encoding(false));
-        }, "Save nodes cache");
+            Try(() => Directory.CreateDirectory(_cacheDirectory), "Create cache directory");
 
-        Try(() =>
-        {
-            var proxiesYaml = _serializer.Serialize(result.Proxies);
-            File.WriteAllText(GetProxiesPath(profileId), proxiesYaml, new UTF8Encoding(false));
-        }, "Save proxies cache");
+            Try(() =>
+            {
+                var nodesJson = JsonSerializer.Serialize(result.Nodes, Options);
+                AtomicFile.WriteAllText(GetNodesPath(profileId), nodesJson, new UTF8Encoding(false));
+            }, "Save nodes cache");
 
-        Try(() =>
-        {
-            var groupsYaml = _serializer.Serialize(result.ProxyGroups);
-            File.WriteAllText(GetGroupsPath(profileId), groupsYaml, new UTF8Encoding(false));
-        }, "Save groups cache");
+            Try(() =>
+            {
+                var proxiesYaml = _serializer.Serialize(result.Proxies);
+                AtomicFile.WriteAllText(GetProxiesPath(profileId), proxiesYaml, new UTF8Encoding(false));
+            }, "Save proxies cache");
+
+            Try(() =>
+            {
+                var groupsYaml = _serializer.Serialize(result.ProxyGroups);
+                AtomicFile.WriteAllText(GetGroupsPath(profileId), groupsYaml, new UTF8Encoding(false));
+            }, "Save groups cache");
+
+            Try(() =>
+            {
+                var ruleProvidersYaml = _serializer.Serialize(result.RuleProviders);
+                AtomicFile.WriteAllText(GetRuleProvidersPath(profileId), ruleProvidersYaml, new UTF8Encoding(false));
+            }, "Save rule providers cache");
+
+            Try(() =>
+            {
+                var rulesText = string.Join(Environment.NewLine, result.Rules ?? Array.Empty<string>());
+                AtomicFile.WriteAllText(GetRulesPath(profileId), rulesText, new UTF8Encoding(false));
+            }, "Save rules cache");
+        }
     }
 
     public void SaveRaw(string profileId, string content)
@@ -67,25 +88,25 @@ public sealed class SubscriptionCacheStore
             return;
         }
 
-        Try(() => Directory.CreateDirectory(_cacheDirectory), "Create cache directory");
-
-        Try(() =>
+        lock (_sync)
         {
-            File.WriteAllText(GetRawPath(profileId), content ?? string.Empty, new UTF8Encoding(false));
-        }, "Save raw cache");
+            Try(() => Directory.CreateDirectory(_cacheDirectory), "Create cache directory");
+
+            Try(() =>
+            {
+                AtomicFile.WriteAllText(GetRawPath(profileId), content ?? string.Empty, new UTF8Encoding(false));
+            }, "Save raw cache");
+        }
     }
 
     public string LoadRaw(string profileId)
     {
         try
         {
-            var path = GetRawPath(profileId);
-            if (!File.Exists(path))
+            lock (_sync)
             {
-                return string.Empty;
+                return AtomicFile.ReadAllTextOrEmpty(GetRawPath(profileId));
             }
-
-            return File.ReadAllText(path);
         }
         catch
         {
@@ -120,9 +141,16 @@ public sealed class SubscriptionCacheStore
                 root["proxy-groups"] = groups;
             }
 
-            if (!root.ContainsKey("rules"))
+            var ruleProviders = LoadRuleProviders(profileId);
+            if (ruleProviders.Count > 0 && !root.ContainsKey("rule-providers"))
             {
-                root["rules"] = BuildRules(_settingsStore.Settings);
+                root["rule-providers"] = ruleProviders;
+            }
+
+            var rules = LoadRules(profileId);
+            if (rules.Count > 0 || !root.ContainsKey("rules"))
+            {
+                root["rules"] = rules.Count > 0 ? rules : BuildRules(_settingsStore.Settings);
             }
 
             return _serializer.Serialize(root);
@@ -137,14 +165,22 @@ public sealed class SubscriptionCacheStore
     {
         try
         {
-            var path = GetNodesPath(profileId);
-            if (!File.Exists(path))
+            lock (_sync)
             {
-                return new List<ProxyNode>();
+                foreach (var json in AtomicFile.ReadTextCandidates(GetNodesPath(profileId)))
+                {
+                    try
+                    {
+                        return JsonSerializer.Deserialize<List<ProxyNode>>(json) ?? new List<ProxyNode>();
+                    }
+                    catch (Exception ex)
+                    {
+                        CrashLogger.Log(ex, "SubscriptionCacheStore: Load nodes");
+                    }
+                }
             }
 
-            var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<List<ProxyNode>>(json) ?? new List<ProxyNode>();
+            return new List<ProxyNode>();
         }
         catch
         {
@@ -156,15 +192,23 @@ public sealed class SubscriptionCacheStore
     {
         try
         {
-            var path = GetProxiesPath(profileId);
-            if (!File.Exists(path))
+            lock (_sync)
             {
+                foreach (var yaml in AtomicFile.ReadTextCandidates(GetProxiesPath(profileId)))
+                {
+                    try
+                    {
+                        return _deserializer.Deserialize<List<Dictionary<string, object>>>(yaml)
+                               ?? new List<Dictionary<string, object>>();
+                    }
+                    catch (Exception ex)
+                    {
+                        CrashLogger.Log(ex, "SubscriptionCacheStore: Load proxies");
+                    }
+                }
+
                 return new List<Dictionary<string, object>>();
             }
-
-            var yaml = File.ReadAllText(path);
-            return _deserializer.Deserialize<List<Dictionary<string, object>>>(yaml)
-                   ?? new List<Dictionary<string, object>>();
         }
         catch
         {
@@ -176,19 +220,92 @@ public sealed class SubscriptionCacheStore
     {
         try
         {
-            var path = GetGroupsPath(profileId);
-            if (!File.Exists(path))
+            lock (_sync)
             {
+                foreach (var yaml in AtomicFile.ReadTextCandidates(GetGroupsPath(profileId)))
+                {
+                    try
+                    {
+                        return _deserializer.Deserialize<List<Dictionary<string, object>>>(yaml)
+                               ?? new List<Dictionary<string, object>>();
+                    }
+                    catch (Exception ex)
+                    {
+                        CrashLogger.Log(ex, "SubscriptionCacheStore: Load groups");
+                    }
+                }
+
                 return new List<Dictionary<string, object>>();
             }
-
-            var yaml = File.ReadAllText(path);
-            return _deserializer.Deserialize<List<Dictionary<string, object>>>(yaml)
-                   ?? new List<Dictionary<string, object>>();
         }
         catch
         {
             return new List<Dictionary<string, object>>();
+        }
+    }
+
+    public IReadOnlyDictionary<string, object> LoadRuleProviders(string profileId)
+    {
+        try
+        {
+            lock (_sync)
+            {
+                foreach (var yaml in AtomicFile.ReadTextCandidates(GetRuleProvidersPath(profileId)))
+                {
+                    try
+                    {
+                        using var reader = new StringReader(yaml);
+                        var deserialized = _deserializer.Deserialize<object>(reader);
+                        return NormalizeMapping(deserialized) ?? new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                    }
+                    catch (Exception ex)
+                    {
+                        CrashLogger.Log(ex, "SubscriptionCacheStore: Load rule providers");
+                    }
+                }
+            }
+
+            return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    public IReadOnlyList<string> LoadRules(string profileId)
+    {
+        try
+        {
+            lock (_sync)
+            {
+                foreach (var text in AtomicFile.ReadTextCandidates(GetRulesPath(profileId)))
+                {
+                    try
+                    {
+                        if (string.IsNullOrWhiteSpace(text))
+                        {
+                            continue;
+                        }
+
+                        return text
+                            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                            .Select(line => line.Trim())
+                            .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith('#'))
+                            .ToList();
+                    }
+                    catch (Exception ex)
+                    {
+                        CrashLogger.Log(ex, "SubscriptionCacheStore: Load rules");
+                    }
+                }
+            }
+
+            return new List<string>();
+        }
+        catch
+        {
+            return new List<string>();
         }
     }
 
@@ -205,6 +322,16 @@ public sealed class SubscriptionCacheStore
     private string GetGroupsPath(string profileId)
     {
         return Path.Combine(_cacheDirectory, $"{profileId}.groups.yaml");
+    }
+
+    private string GetRuleProvidersPath(string profileId)
+    {
+        return Path.Combine(_cacheDirectory, $"{profileId}.rule-providers.yaml");
+    }
+
+    private string GetRulesPath(string profileId)
+    {
+        return Path.Combine(_cacheDirectory, $"{profileId}.rules.txt");
     }
 
     private string GetRawPath(string profileId)
@@ -316,15 +443,11 @@ public sealed class SubscriptionCacheStore
             ["enable"] = settings.TunEnabled,
             ["stack"] = "system",
             ["auto-route"] = true,
-            ["auto-detect-interface"] = true
+            ["auto-detect-interface"] = true,
+            ["strict-route"] = true,
+            ["dns-hijack"] = new[] { "any:53" }
         };
-        root["dns"] = new Dictionary<string, object>
-        {
-            ["enable"] = true,
-            ["listen"] = "0.0.0.0:1053",
-            ["enhanced-mode"] = "fake-ip",
-            ["nameserver"] = new[] { "223.5.5.5", "1.1.1.1" }
-        };
+        root["dns"] = MihomoDnsConfig.Build();
 
         if (!string.IsNullOrWhiteSpace(settings.ApiSecret))
         {
@@ -363,19 +486,15 @@ public sealed class SubscriptionCacheStore
                 ["enable"] = settings.TunEnabled,
                 ["stack"] = "system",
                 ["auto-route"] = true,
-                ["auto-detect-interface"] = true
+                ["auto-detect-interface"] = true,
+                ["strict-route"] = true,
+                ["dns-hijack"] = new[] { "any:53" }
             };
         }
 
         if (!root.ContainsKey("dns"))
         {
-            root["dns"] = new Dictionary<string, object>
-            {
-                ["enable"] = true,
-                ["listen"] = "0.0.0.0:1053",
-                ["enhanced-mode"] = "fake-ip",
-                ["nameserver"] = new[] { "223.5.5.5", "1.1.1.1" }
-            };
+            root["dns"] = MihomoDnsConfig.Build();
         }
 
         if (!string.IsNullOrWhiteSpace(settings.ApiSecret))
@@ -394,12 +513,22 @@ public sealed class SubscriptionCacheStore
 
     private IReadOnlyList<string> BuildRules(AppSettings settings)
     {
-        var selectionGroup = settings.SelectionGroup;
+        var selectionGroup = RoutingDefaults.ResolveSelectionGroup(settings.SelectionGroup, settings.UseSubscriptionPolicyGroups);
         var rules = _rulesStore.LoadRules().ToList();
+        if (rules.Count == 0 && !settings.UseSubscriptionPolicyGroups)
+        {
+            rules = _defaultRulesService.GetDefaultRules(selectionGroup).ToList();
+        }
+
         var blockedRules = BuildBlockedRules(settings.BlockedSites);
         if (blockedRules.Count > 0)
         {
             rules.InsertRange(0, blockedRules);
+        }
+
+        if (!settings.UseSubscriptionPolicyGroups)
+        {
+            rules = NormalizeRulesForFlatMode(rules, selectionGroup);
         }
 
         if (rules.Count == 0)
@@ -414,6 +543,48 @@ public sealed class SubscriptionCacheStore
         }
 
         return rules;
+    }
+
+    private static List<string> NormalizeRulesForFlatMode(List<string> rules, string selectionGroup)
+    {
+        var normalized = new List<string>(rules.Count);
+        foreach (var raw in rules)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            var parts = raw.Split(',');
+            if (parts.Length < 2)
+            {
+                normalized.Add(raw);
+                continue;
+            }
+
+            var head = parts[0].Trim();
+            var policyIndex = head.Equals("MATCH", StringComparison.OrdinalIgnoreCase) ? 1 : 2;
+            if (policyIndex >= parts.Length)
+            {
+                normalized.Add(raw);
+                continue;
+            }
+
+            var policy = parts[policyIndex].Trim();
+            var keepPolicy =
+                policy.Equals("DIRECT", StringComparison.OrdinalIgnoreCase)
+                || policy.Equals("REJECT", StringComparison.OrdinalIgnoreCase)
+                || policy.Equals(selectionGroup, StringComparison.Ordinal);
+
+            if (!keepPolicy)
+            {
+                parts[policyIndex] = selectionGroup;
+            }
+
+            normalized.Add(string.Join(",", parts));
+        }
+
+        return normalized;
     }
 
     private static List<string> BuildBlockedRules(string? blockedSites)

@@ -1,52 +1,86 @@
 ﻿using System;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using ProxyStarter.App.Models;
+using ProxyStarter.App.Helpers;
 
 namespace ProxyStarter.App.Services;
 
-public sealed class CoreController
+public sealed class CoreController : IDisposable
 {
     private readonly IMihomoProcessService _processService;
     private readonly AppSettingsStore _settingsStore;
-    private readonly ConfigWriter _configWriter;
+    private readonly ProxyCoreAdapterFactory _coreAdapterFactory;
+    private readonly SystemProxyService _systemProxyService;
+    private readonly SemaphoreSlim _gate = new(1, 1);
 
     public CoreController(
         IMihomoProcessService processService,
         AppSettingsStore settingsStore,
-        ConfigWriter configWriter)
+        ProxyCoreAdapterFactory coreAdapterFactory,
+        SystemProxyService systemProxyService)
     {
         _processService = processService;
         _settingsStore = settingsStore;
-        _configWriter = configWriter;
+        _coreAdapterFactory = coreAdapterFactory;
+        _systemProxyService = systemProxyService;
 
-        _processService.RunningChanged += (_, isRunning) => RunningChanged?.Invoke(this, isRunning);
+        _processService.RunningChanged += OnProcessRunningChanged;
     }
 
     public bool IsRunning => _processService.IsRunning;
 
     public event EventHandler<bool>? RunningChanged;
 
-    public Task StartAsync(CancellationToken cancellationToken = default)
+    public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        var settings = _settingsStore.Settings;
-        var configPath = _configWriter.EnsureConfig(settings);
-        var corePath = ResolveCorePath(settings.CorePath);
-
-        var options = new MihomoLaunchOptions
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            CorePath = corePath,
-            ConfigPath = configPath,
-            WorkingDirectory = Path.GetDirectoryName(corePath) ?? AppContext.BaseDirectory
-        };
+            if (IsRunning)
+            {
+                return;
+            }
 
-        return _processService.StartAsync(options, cancellationToken);
+            var settings = _settingsStore.Settings;
+            var adapter = _coreAdapterFactory.Create(settings);
+
+            if (settings.TunEnabled && !ElevationHelper.IsRunningAsAdministrator())
+            {
+                CrashLogger.Log(
+                    new InvalidOperationException("TUN mode requires administrator privileges."),
+                    "CoreController: StartAsync");
+                return;
+            }
+
+            var configPath = await Task.Run(() => adapter.EnsureConfig(settings), cancellationToken)
+                .ConfigureAwait(false);
+            var options = adapter.CreateLaunchOptions(settings, configPath);
+
+            await _processService.StartAsync(options, cancellationToken).ConfigureAwait(false);
+
+            if (_processService.IsRunning)
+            {
+                _systemProxyService.Apply(settings);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken = default)
+    public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        return _processService.StopAsync(cancellationToken);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _processService.StopAsync(cancellationToken).ConfigureAwait(false);
+            _systemProxyService.Restore();
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public Task ToggleAsync(CancellationToken cancellationToken = default)
@@ -54,13 +88,19 @@ public sealed class CoreController
         return IsRunning ? StopAsync(cancellationToken) : StartAsync(cancellationToken);
     }
 
-    private static string ResolveCorePath(string configuredPath)
+    private void OnProcessRunningChanged(object? sender, bool isRunning)
     {
-        if (Path.IsPathRooted(configuredPath))
+        if (!isRunning)
         {
-            return configuredPath;
+            _systemProxyService.Restore();
         }
 
-        return Path.Combine(AppContext.BaseDirectory, configuredPath);
+        RunningChanged?.Invoke(this, isRunning);
+    }
+
+    public void Dispose()
+    {
+        _processService.RunningChanged -= OnProcessRunningChanged;
+        _gate.Dispose();
     }
 }

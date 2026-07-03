@@ -51,7 +51,7 @@
                      AcceptsReturn="True"
                      AcceptsTab="True"
                      TextWrapping="NoWrap"
-                     VerticalScrollBarVisibility="Auto"
+                     VerticalScrollBarVisibility="Visible"
                      HorizontalScrollBarVisibility="Auto"
                      BorderThickness="0"
                      Background="Transparent"
@@ -68,4 +68,3 @@
         </StackPanel>
     </Grid>
 </ui:FluentWindow>
-
