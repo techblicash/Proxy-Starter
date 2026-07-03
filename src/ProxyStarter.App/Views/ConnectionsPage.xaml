@@ -159,10 +159,18 @@
                                         <ui:Button Grid.Column="1"
                                                    Width="32"
                                                    Height="32"
+                                                   Margin="12,0,4,0"
+                                                   Padding="0"
+                                                   HorizontalContentAlignment="Center"
+                                                   VerticalContentAlignment="Center"
                                                    Appearance="Secondary"
                                                    Command="{Binding DataContext.CloseConnectionCommand, RelativeSource={RelativeSource AncestorType=ui:ListView}}"
                                                    CommandParameter="{Binding}">
-                                            <ui:SymbolIcon Symbol="Dismiss24" />
+                                            <ui:SymbolIcon Width="16"
+                                                           Height="16"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           Symbol="Dismiss24" />
                                         </ui:Button>
                                     </Grid>
                                 </Border>
