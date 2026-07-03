@@ -74,6 +74,7 @@ public partial class App : System.Windows.Application
                 services.AddSingleton<SystemProxyService>();
                 services.AddSingleton<IMihomoProcessService, MihomoProcessService>();
                 services.AddSingleton<CoreController>();
+                services.AddSingleton<CoreHealthMonitorService>();
                 services.AddSingleton<TrafficMonitorService>();
                 services.AddSingleton<ConnectionMonitorService>();
                 services.AddSingleton<ConnectionsMonitorService>();
@@ -151,6 +152,9 @@ public partial class App : System.Windows.Application
 
         var logService = _host.Services.GetRequiredService<MihomoLogService>();
         logService.Start();
+
+        var coreHealthMonitor = _host.Services.GetRequiredService<CoreHealthMonitorService>();
+        coreHealthMonitor.Start();
 
         var window = _host.Services.GetRequiredService<MainWindow>();
         Current.MainWindow = window;
