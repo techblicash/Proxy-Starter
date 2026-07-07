@@ -22,6 +22,9 @@ public sealed partial class ProxyNode : ObservableObject
     private int _latencyMs = -1;
 
     [ObservableProperty]
+    private string _speedText = string.Empty;
+
+    [ObservableProperty]
     private string _sourceId = string.Empty;
 
     [ObservableProperty]

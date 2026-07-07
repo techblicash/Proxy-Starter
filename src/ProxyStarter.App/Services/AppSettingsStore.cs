@@ -88,7 +88,7 @@ public sealed class AppSettingsStore
         settings.ContentAcrylicOpacity = Math.Clamp(settings.ContentAcrylicOpacity, 0, 255);
         settings.FontSize = Math.Clamp(settings.FontSize, 10, 24);
         settings.BlockedSites ??= string.Empty;
-        settings.UpdateFeedUrl ??= string.Empty;
+        settings.UpdateFeedUrl = DefaultIfBlank(settings.UpdateFeedUrl, SoftwareUpdateDefaults.FeedUrl);
         settings.DownloadLimitKbps = Math.Max(0, settings.DownloadLimitKbps);
         settings.UploadLimitKbps = Math.Max(0, settings.UploadLimitKbps);
         settings.Language = NormalizeChoice(settings.Language, "English", "English", "中文");

@@ -18,7 +18,7 @@ public sealed class AppSettings
     public string SelectionGroup { get; set; } = "Auto";
     public bool UseSubscriptionPolicyGroups { get; set; } = true;
     public bool AutoStart { get; set; } = false;
-    public string UpdateFeedUrl { get; set; } = string.Empty;
+    public string UpdateFeedUrl { get; set; } = global::ProxyStarter.App.Services.SoftwareUpdateDefaults.FeedUrl;
     public string Theme { get; set; } = "Light";
 
     public int PaneAcrylicOpacity { get; set; } = 112;

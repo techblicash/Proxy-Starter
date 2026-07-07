@@ -51,8 +51,10 @@
     <sys:String x:Key="Text_Select">Select</sys:String>
     <sys:String x:Key="Text_TcpTest">TCP Test</sys:String>
     <sys:String x:Key="Text_ConnectTest">Connect Test</sys:String>
+    <sys:String x:Key="Text_SpeedTest">Speed Test</sys:String>
     <sys:String x:Key="Text_TcpTestAll">TCP Test All</sys:String>
     <sys:String x:Key="Text_ConnectTestAll">Connect Test All</sys:String>
+    <sys:String x:Key="Text_SpeedTestAll">Speed Test All</sys:String>
     <sys:String x:Key="Text_Type">Type</sys:String>
     <sys:String x:Key="Text_Port">Port</sys:String>
     <sys:String x:Key="Text_LatencyMs">Latency (ms)</sys:String>

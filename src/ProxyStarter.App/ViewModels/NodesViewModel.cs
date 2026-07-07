@@ -43,6 +43,9 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
     private bool _isTestingAll;
 
     [ObservableProperty]
+    private bool _isSpeedTestingAll;
+
+    [ObservableProperty]
     private string _selectedGroup;
 
     [ObservableProperty]
@@ -195,6 +198,17 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
     }
 
     [RelayCommand]
+    private async Task SpeedTestAsync()
+    {
+        if (SelectedNode is null)
+        {
+            return;
+        }
+
+        await SpeedTestNodeAsync(SelectedNode);
+    }
+
+    [RelayCommand]
     private void PickNode(ProxyNode? node)
     {
         if (node is null)
@@ -275,6 +289,28 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
     }
 
     [RelayCommand]
+    private async Task SpeedTestNodeAsync(ProxyNode? node)
+    {
+        if (node is null)
+        {
+            return;
+        }
+
+        UpdateSpeed(node, "Testing...");
+        double speed;
+        try
+        {
+            speed = await _latencyTestService.TestProxyDownloadSpeedMbpsAsync(node.Name);
+        }
+        catch
+        {
+            speed = -1;
+        }
+
+        UpdateSpeed(node, speed > 0 ? $"{speed:0.##} Mbps" : "Failed");
+    }
+
+    [RelayCommand]
     private async Task TcpTestAllAsync()
     {
         await TestAllAsync(node => _latencyTestService.TestTcpAsync(node.Address, node.Port));
@@ -284,6 +320,56 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
     private async Task ConnectTestAllAsync()
     {
         await TestAllAsync(node => _latencyTestService.TestProxyDelayAsync(node.Name));
+    }
+
+    [RelayCommand]
+    private async Task SpeedTestAllAsync()
+    {
+        var nodesToTest = _currentDisplayNodes
+            .Where(node => !string.IsNullOrWhiteSpace(node.Name)
+                           && !node.Name.Equals("DIRECT", StringComparison.OrdinalIgnoreCase)
+                           && !node.Name.Equals("REJECT", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (IsSpeedTestingAll || nodesToTest.Count == 0)
+        {
+            return;
+        }
+
+        IsSpeedTestingAll = true;
+        var semaphore = new SemaphoreSlim(2);
+        try
+        {
+            var tasks = nodesToTest.Select(async node =>
+            {
+                await semaphore.WaitAsync();
+                try
+                {
+                    UpdateSpeed(node, "Testing...");
+                    double speed;
+                    try
+                    {
+                        speed = await _latencyTestService.TestProxyDownloadSpeedMbpsAsync(node.Name);
+                    }
+                    catch
+                    {
+                        speed = -1;
+                    }
+
+                    UpdateSpeed(node, speed > 0 ? $"{speed:0.##} Mbps" : "Failed");
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            await Task.WhenAll(tasks);
+        }
+        finally
+        {
+            IsSpeedTestingAll = false;
+        }
     }
 
     private async Task LoadFromCatalogAsync()
@@ -935,6 +1021,17 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         }
 
         Application.Current.Dispatcher.BeginInvoke(() => node.LatencyMs = latency, DispatcherPriority.Background);
+    }
+
+    private static void UpdateSpeed(ProxyNode node, string speedText)
+    {
+        if (Application.Current is null)
+        {
+            node.SpeedText = speedText;
+            return;
+        }
+
+        Application.Current.Dispatcher.BeginInvoke(() => node.SpeedText = speedText, DispatcherPriority.Background);
     }
 
     private void SyncPolicyGroupModeFromSettings()

@@ -96,10 +96,33 @@
                             </TextBlock>
                         </StackPanel>
 
-                        <ui:Button Content="{DynamicResource Text_ConnectTest}"
-                                   Appearance="Secondary"
-                                   Command="{Binding DataContext.ConnectTestNodeCommand, RelativeSource={RelativeSource AncestorType=Page}}"
-                                   CommandParameter="{Binding}" />
+                        <TextBlock Text="{Binding SpeedText}"
+                                   HorizontalAlignment="Right"
+                                   FontWeight="SemiBold"
+                                   Margin="0,0,0,6">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SpeedText}" Value="">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <ui:Button Content="{DynamicResource Text_ConnectTest}"
+                                       Appearance="Secondary"
+                                       Margin="0,0,6,0"
+                                       Command="{Binding DataContext.ConnectTestNodeCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                       CommandParameter="{Binding}" />
+                            <ui:Button Content="{DynamicResource Text_SpeedTest}"
+                                       Appearance="Secondary"
+                                       Command="{Binding DataContext.SpeedTestNodeCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                       CommandParameter="{Binding}" />
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -141,8 +164,10 @@
                         <ui:Button Content="定位当前节点" Click="OnLocateActiveNodeClick" Margin="0,0,8,8" />
                         <ui:Button Content="{DynamicResource Text_TcpTest}" Command="{Binding TcpTestCommand}" Margin="0,0,8,8" />
                         <ui:Button Content="{DynamicResource Text_ConnectTest}" Command="{Binding ConnectTestCommand}" Margin="0,0,8,8" />
+                        <ui:Button Content="{DynamicResource Text_SpeedTest}" Command="{Binding SpeedTestCommand}" Margin="0,0,8,8" />
                         <ui:Button Content="{DynamicResource Text_TcpTestAll}" Command="{Binding TcpTestAllCommand}" Margin="0,0,8,8" />
                         <ui:Button Content="{DynamicResource Text_ConnectTestAll}" Command="{Binding ConnectTestAllCommand}" Margin="0,0,8,8" />
+                        <ui:Button Content="{DynamicResource Text_SpeedTestAll}" Command="{Binding SpeedTestAllCommand}" Margin="0,0,8,8" />
                     </WrapPanel>
 
                     <StackPanel Grid.Column="1"

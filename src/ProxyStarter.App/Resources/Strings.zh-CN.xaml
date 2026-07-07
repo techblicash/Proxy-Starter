@@ -51,8 +51,10 @@
     <sys:String x:Key="Text_Select">选择</sys:String>
     <sys:String x:Key="Text_TcpTest">TCP 测试</sys:String>
     <sys:String x:Key="Text_ConnectTest">连接测试</sys:String>
+    <sys:String x:Key="Text_SpeedTest">测速</sys:String>
     <sys:String x:Key="Text_TcpTestAll">TCP 测试全部</sys:String>
     <sys:String x:Key="Text_ConnectTestAll">连接测试全部</sys:String>
+    <sys:String x:Key="Text_SpeedTestAll">测速全部</sys:String>
     <sys:String x:Key="Text_Type">类型</sys:String>
     <sys:String x:Key="Text_Port">端口</sys:String>
     <sys:String x:Key="Text_LatencyMs">延迟（ms）</sys:String>

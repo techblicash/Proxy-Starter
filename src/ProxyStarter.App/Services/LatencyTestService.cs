@@ -22,6 +22,13 @@ public sealed class LatencyTestService
         "http://www.msftconnecttest.com/connecttest.txt"
     };
 
+    private static readonly string[] SpeedTestCandidates =
+    {
+        "https://speed.cloudflare.com/__down?bytes=5000000",
+        "https://cachefly.cachefly.net/5mb.test",
+        "https://ash-speed.hetzner.com/10MB.bin"
+    };
+
     private readonly MihomoApiClient _apiClient;
     private readonly AppSettingsStore _settingsStore;
     private readonly ProxyCatalogStore _proxyCatalogStore;
@@ -67,6 +74,16 @@ public sealed class LatencyTestService
         return await _apiClient.TestDelayAsync(proxyName, timeoutMs, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<double> TestProxyDownloadSpeedMbpsAsync(
+        string proxyName,
+        int timeoutMs = 12000,
+        long maxBytes = 5_000_000,
+        CancellationToken cancellationToken = default)
+    {
+        return await TestSpeedWithTemporaryMihomoAsync(proxyName, timeoutMs, maxBytes, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     private async Task<int> TestWithTemporaryMihomoAsync(string proxyName, int timeoutMs, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(proxyName))
@@ -74,13 +91,7 @@ public sealed class LatencyTestService
             return -1;
         }
 
-        var settings = _settingsStore.Settings;
-        if (ProxyCoreAdapterFactory.NormalizeCoreType(settings.CoreType) != "mihomo")
-        {
-            return -1;
-        }
-
-        var corePath = ProxyCorePath.ResolveExecutable(settings.CorePath);
+        var corePath = ResolveMihomoExecutable(_settingsStore.Settings);
         if (!File.Exists(corePath))
         {
             return -1;
@@ -163,6 +174,107 @@ public sealed class LatencyTestService
         }
     }
 
+    private async Task<double> TestSpeedWithTemporaryMihomoAsync(
+        string proxyName,
+        int timeoutMs,
+        long maxBytes,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(proxyName))
+        {
+            return -1;
+        }
+
+        var settings = _settingsStore.Settings;
+        if (ProxyCoreAdapterFactory.NormalizeCoreType(settings.CoreType) != "mihomo")
+        {
+            return -1;
+        }
+
+        var corePath = ProxyCorePath.ResolveExecutable(settings.CorePath);
+        if (!File.Exists(corePath))
+        {
+            return -1;
+        }
+
+        var proxy = FindProxyDefinition(proxyName);
+        if (proxy is null)
+        {
+            return -1;
+        }
+
+        var tempDirectory = Path.Combine(AppPaths.DataDirectory, "tmp");
+        var configPath = Path.Combine(tempDirectory, $"speed-test-{Guid.NewGuid():N}.yaml");
+        var mixedPort = GetFreeTcpPort();
+        var apiPort = GetFreeTcpPort();
+        var dnsPort = GetFreeTcpPort();
+        var output = new StringBuilder();
+
+        Process? process = null;
+        try
+        {
+            Directory.CreateDirectory(tempDirectory);
+            var config = BuildTemporaryMihomoConfig(proxy, mixedPort, apiPort, dnsPort);
+            AtomicFile.WriteAllText(configPath, _serializer.Serialize(config), new UTF8Encoding(false));
+
+            process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = corePath,
+                    Arguments = $"-f \"{configPath}\" -d \"{AppPaths.DataDirectory}\"",
+                    WorkingDirectory = AppPaths.DataDirectory,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                },
+                EnableRaisingEvents = true
+            };
+
+            process.OutputDataReceived += (_, e) => AppendOutput(output, e.Data);
+            process.ErrorDataReceived += (_, e) => AppendOutput(output, e.Data);
+
+            if (!process.Start())
+            {
+                return -1;
+            }
+
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            await Task.Delay(700, cancellationToken).ConfigureAwait(false);
+
+            if (process.HasExited)
+            {
+                LogTemporaryFailure(proxyName, "temporary core exited before speed test", output);
+                return -1;
+            }
+
+            var speed = await TestDownloadSpeedThroughProxyAsync(mixedPort, timeoutMs, maxBytes, cancellationToken)
+                .ConfigureAwait(false);
+            if (speed < 0)
+            {
+                LogTemporaryFailure(proxyName, "all speed test candidates failed", output);
+            }
+
+            return speed;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            CrashLogger.Log(ex, "LatencyTestService: Temporary Mihomo speed test");
+            return -1;
+        }
+        finally
+        {
+            await StopProcessAsync(process).ConfigureAwait(false);
+            TryDelete(configPath);
+        }
+    }
+
     private Dictionary<string, object>? FindProxyDefinition(string proxyName)
     {
         foreach (var proxy in _proxyCatalogStore.LoadProxyDefinitions())
@@ -180,6 +292,20 @@ public sealed class LatencyTestService
         }
 
         return null;
+    }
+
+    private static string ResolveMihomoExecutable(ProxyStarter.App.Models.AppSettings settings)
+    {
+        if (ProxyCoreAdapterFactory.NormalizeCoreType(settings.CoreType) == "mihomo")
+        {
+            var configured = ProxyCorePath.ResolveExecutable(settings.CorePath);
+            if (File.Exists(configured))
+            {
+                return configured;
+            }
+        }
+
+        return ProxyCorePath.ResolveExecutable(CoreCatalog.Get("mihomo").RelativeExecutablePath);
     }
 
     private static Dictionary<string, object> BuildTemporaryMihomoConfig(
@@ -240,6 +366,77 @@ public sealed class LatencyTestService
                 {
                     return (int)watch.ElapsedMilliseconds;
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+            }
+        }
+
+        return -1;
+    }
+
+    private static async Task<double> TestDownloadSpeedThroughProxyAsync(
+        int mixedPort,
+        int timeoutMs,
+        long maxBytes,
+        CancellationToken cancellationToken)
+    {
+        foreach (var url in SpeedTestCandidates)
+        {
+            using var handler = new HttpClientHandler
+            {
+                UseProxy = true,
+                Proxy = new WebProxy($"http://127.0.0.1:{mixedPort}")
+            };
+            using var client = new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromMilliseconds(Math.Max(3000, timeoutMs))
+            };
+
+            try
+            {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(timeoutMs);
+                using var response = await client.GetAsync(
+                    url,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    timeoutCts.Token).ConfigureAwait(false);
+
+                if ((int)response.StatusCode >= 400)
+                {
+                    continue;
+                }
+
+                await using var stream = await response.Content.ReadAsStreamAsync(timeoutCts.Token)
+                    .ConfigureAwait(false);
+                var buffer = new byte[64 * 1024];
+                long totalBytes = 0;
+                var watch = Stopwatch.StartNew();
+
+                while (totalBytes < maxBytes)
+                {
+                    var bytesRead = await stream.ReadAsync(
+                        buffer.AsMemory(0, (int)Math.Min(buffer.Length, maxBytes - totalBytes)),
+                        timeoutCts.Token).ConfigureAwait(false);
+                    if (bytesRead <= 0)
+                    {
+                        break;
+                    }
+
+                    totalBytes += bytesRead;
+                }
+
+                watch.Stop();
+                if (totalBytes < 128 * 1024 || watch.Elapsed.TotalSeconds <= 0)
+                {
+                    continue;
+                }
+
+                return Math.Round(totalBytes * 8d / watch.Elapsed.TotalSeconds / 1_000_000d, 2);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
