@@ -142,11 +142,16 @@ public sealed class LatencyTestService
 
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
-            await Task.Delay(500, cancellationToken).ConfigureAwait(false);
 
             if (process.HasExited)
             {
                 LogTemporaryFailure(proxyName, "temporary core exited before URL test", output);
+                return -1;
+            }
+
+            if (!await WaitForTcpPortAsync(mixedPort, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false))
+            {
+                LogTemporaryFailure(proxyName, "temporary core did not open mixed port before URL test", output);
                 return -1;
             }
 
@@ -185,13 +190,7 @@ public sealed class LatencyTestService
             return -1;
         }
 
-        var settings = _settingsStore.Settings;
-        if (ProxyCoreAdapterFactory.NormalizeCoreType(settings.CoreType) != "mihomo")
-        {
-            return -1;
-        }
-
-        var corePath = ProxyCorePath.ResolveExecutable(settings.CorePath);
+        var corePath = ResolveMihomoExecutable(_settingsStore.Settings);
         if (!File.Exists(corePath))
         {
             return -1;
@@ -242,11 +241,16 @@ public sealed class LatencyTestService
 
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
-            await Task.Delay(700, cancellationToken).ConfigureAwait(false);
 
             if (process.HasExited)
             {
                 LogTemporaryFailure(proxyName, "temporary core exited before speed test", output);
+                return -1;
+            }
+
+            if (!await WaitForTcpPortAsync(mixedPort, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false))
+            {
+                LogTemporaryFailure(proxyName, "temporary core did not open mixed port before speed test", output);
                 return -1;
             }
 
@@ -462,6 +466,37 @@ public sealed class LatencyTestService
         {
             listener.Stop();
         }
+    }
+
+    private static async Task<bool> WaitForTcpPortAsync(
+        int port,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                using var client = new TcpClient();
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(300);
+                await client.ConnectAsync(IPAddress.Loopback, port, timeoutCts.Token).ConfigureAwait(false);
+                return true;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch
+            {
+                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        return false;
     }
 
     private static void AppendOutput(StringBuilder output, string? line)
