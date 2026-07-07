@@ -9,6 +9,8 @@ namespace ProxyStarter.App.Services;
 
 public sealed class SoftwareUpdateService
 {
+    private static readonly IFileDownloader Downloader = new FallbackFileDownloader();
+
     private UpdateManager? _preparedManager;
     private VelopackAsset? _preparedAsset;
 
@@ -104,7 +106,12 @@ public sealed class SoftwareUpdateService
         if (Uri.TryCreate(updateFeedUrl, UriKind.Absolute, out var uri)
             && uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
         {
-            return new UpdateManager(new GithubSource(updateFeedUrl, string.Empty, prerelease: false, downloader: null));
+            return new UpdateManager(new GithubSource(updateFeedUrl, string.Empty, prerelease: false, Downloader));
+        }
+
+        if (Uri.TryCreate(updateFeedUrl, UriKind.Absolute, out _))
+        {
+            return new UpdateManager(new SimpleWebSource(updateFeedUrl, Downloader));
         }
 
         return new UpdateManager(updateFeedUrl);
