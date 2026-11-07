@@ -19,6 +19,8 @@ public sealed class ProxyCatalogStore
     private readonly ISerializer _serializer;
     private readonly IDeserializer _deserializer;
     private readonly object _sync = new();
+    private HashSet<string> _selectionGroups = new(StringComparer.OrdinalIgnoreCase);
+    private string _defaultSelectionGroup = RoutingDefaults.FlatModeSelectionGroup;
 
     public ProxyCatalogStore()
     {
@@ -48,6 +50,16 @@ public sealed class ProxyCatalogStore
             }
 
             return new List<ProxyNode>();
+        }
+    }
+
+    public string ResolveSelectionGroup(AppSettings settings)
+    {
+        lock (_sync)
+        {
+            return _selectionGroups.TryGetValue(settings.SelectionGroup, out var group)
+                ? group
+                : _defaultSelectionGroup;
         }
     }
 
@@ -125,7 +137,7 @@ public sealed class ProxyCatalogStore
                 {
                     if (string.IsNullOrWhiteSpace(text))
                     {
-                        continue;
+                        return Array.Empty<string>();
                     }
 
                     return text
@@ -145,9 +157,9 @@ public sealed class ProxyCatalogStore
     }
 
     public void Save(
-        IEnumerable<ProxyNode> nodes,
+        IReadOnlyList<ProxyNode> nodes,
         IEnumerable<Dictionary<string, object>> proxies,
-        IEnumerable<Dictionary<string, object>> groups,
+        IReadOnlyList<Dictionary<string, object>> groups,
         IDictionary<string, object>? ruleProviders = null,
         IEnumerable<string>? rules = null)
     {
@@ -172,6 +184,16 @@ public sealed class ProxyCatalogStore
 
             var rulesText = string.Join(Environment.NewLine, rules ?? Array.Empty<string>());
             AtomicFile.WriteAllText(_rulesPath, rulesText, utf8NoBom);
+
+            var flatNodes = RoutingDefaults.GetFlatNodes(nodes, groups);
+            var flatGroup = RoutingDefaults.GetFlatGroupName(nodes, groups);
+            _selectionGroups = groups.Select(RoutingDefaults.GroupName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (flatNodes.Count > 0)
+            {
+                _selectionGroups.Add(flatGroup);
+            }
+
+            _defaultSelectionGroup = RoutingDefaults.GetDefaultGroupName(groups, flatNodes.Count > 0, flatGroup);
         }
     }
 

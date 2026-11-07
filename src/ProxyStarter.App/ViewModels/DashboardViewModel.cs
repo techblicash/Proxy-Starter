@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 using System.IO;
 using System.Threading;
@@ -120,9 +120,7 @@ public partial class DashboardViewModel : ObservableObject, IPageLifecycleAware
             var corePath = ProxyCorePath.ResolveExecutable(_settingsStore.Settings.CorePath);
             if (!File.Exists(corePath))
             {
-                await _dialogService.ShowErrorAsync(
-                    "Core Not Found",
-                    $"Core executable was not found:\n{corePath}\n\nPlease update Core Path in Settings.");
+                await _dialogService.ShowErrorAsync(DialogError.CoreNotFound, corePath);
                 return;
             }
         }
@@ -134,7 +132,7 @@ public partial class DashboardViewModel : ObservableObject, IPageLifecycleAware
         catch (Exception ex)
         {
             CrashLogger.Log(ex, "DashboardViewModel: Toggle core");
-            await _dialogService.ShowErrorAsync("Core Operation Failed", ex.Message);
+            await _dialogService.ShowErrorAsync(DialogError.CoreOperation, ex.Message);
         }
     }
 
@@ -184,7 +182,7 @@ public partial class DashboardViewModel : ObservableObject, IPageLifecycleAware
         catch (Exception ex)
         {
             CrashLogger.Log(ex, "DashboardViewModel: Save network");
-            await _dialogService.ShowErrorAsync("Network Settings Failed", ex.Message);
+            await _dialogService.ShowErrorAsync(DialogError.NetworkSettings, ex.Message);
             LoadNetworkSettings();
         }
     }
@@ -403,9 +401,7 @@ public partial class DashboardViewModel : ObservableObject, IPageLifecycleAware
             return true;
         }
 
-        await _dialogService.ShowErrorAsync(
-            "Elevation Failed",
-            "无法以管理员权限重启应用。请手动右键“以管理员身份运行”。");
+        await _dialogService.ShowErrorAsync(DialogError.Elevation);
         return false;
     }
 

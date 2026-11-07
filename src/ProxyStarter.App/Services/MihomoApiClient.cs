@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.IO;
@@ -17,15 +17,17 @@ public sealed class MihomoApiClient
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly AppSettingsStore _settingsStore;
+    private readonly ProxyCatalogStore _proxyCatalogStore;
     private readonly SemaphoreSlim _proxiesCacheGate = new(1, 1);
     private MihomoProxiesSnapshot? _proxiesCache;
     private DateTimeOffset _proxiesCacheAt;
     private static readonly TimeSpan ProxiesCacheTtl = TimeSpan.FromSeconds(2);
 
-    public MihomoApiClient(IHttpClientFactory httpClientFactory, AppSettingsStore settingsStore)
+    public MihomoApiClient(IHttpClientFactory httpClientFactory, AppSettingsStore settingsStore, ProxyCatalogStore proxyCatalogStore)
     {
         _httpClientFactory = httpClientFactory;
         _settingsStore = settingsStore;
+        _proxyCatalogStore = proxyCatalogStore;
     }
 
     public async Task<MihomoProxiesSnapshot?> GetProxiesAsync(CancellationToken cancellationToken = default)
@@ -527,9 +529,7 @@ public sealed class MihomoApiClient
             return true;
         }
 
-        var effectiveGroup = RoutingDefaults.ResolveSelectionGroup(
-            _settingsStore.Settings.SelectionGroup,
-            _settingsStore.Settings.UseSubscriptionPolicyGroups);
+        var effectiveGroup = _proxyCatalogStore.ResolveSelectionGroup(_settingsStore.Settings);
 
         if (Yield(effectiveGroup))
         {
@@ -613,9 +613,7 @@ public sealed class MihomoApiClient
             yield return requestedGroup;
         }
 
-        var effectiveGroup = RoutingDefaults.ResolveSelectionGroup(
-            _settingsStore.Settings.SelectionGroup,
-            _settingsStore.Settings.UseSubscriptionPolicyGroups);
+        var effectiveGroup = _proxyCatalogStore.ResolveSelectionGroup(_settingsStore.Settings);
         if (Yield(effectiveGroup))
         {
             yield return effectiveGroup;

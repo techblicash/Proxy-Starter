@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using ProxyStarter.App.Models;
@@ -9,6 +9,7 @@ public sealed class ConnectionMonitorService : IDisposable
 {
     private readonly MihomoApiClient _apiClient;
     private readonly AppSettingsStore _settingsStore;
+    private readonly ProxyCatalogStore _proxyCatalogStore;
     private readonly System.Threading.Timer _timer;
     private CancellationTokenSource? _cts;
     private volatile bool _isRunning;
@@ -16,10 +17,11 @@ public sealed class ConnectionMonitorService : IDisposable
 
     public event EventHandler<ConnectionStatusSnapshot>? StatusUpdated;
 
-    public ConnectionMonitorService(MihomoApiClient apiClient, AppSettingsStore settingsStore)
+    public ConnectionMonitorService(MihomoApiClient apiClient, AppSettingsStore settingsStore, ProxyCatalogStore proxyCatalogStore)
     {
         _apiClient = apiClient;
         _settingsStore = settingsStore;
+        _proxyCatalogStore = proxyCatalogStore;
         _timer = new System.Threading.Timer(OnTick);
     }
 
@@ -66,7 +68,7 @@ public sealed class ConnectionMonitorService : IDisposable
         {
             var connections = await _apiClient.GetConnectionsAsync(token).ConfigureAwait(false);
             var settings = _settingsStore.Settings;
-            var selectionGroup = RoutingDefaults.ResolveSelectionGroup(settings.SelectionGroup, settings.UseSubscriptionPolicyGroups);
+            var selectionGroup = _proxyCatalogStore.ResolveSelectionGroup(settings);
             var activeNode = await _apiClient.GetResolvedSelectedProxyAsync(selectionGroup, token).ConfigureAwait(false);
             if (token.IsCancellationRequested || !_isRunning)
             {

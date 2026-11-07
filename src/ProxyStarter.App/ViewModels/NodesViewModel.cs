@@ -17,6 +17,7 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
 {
     private readonly ProxyCatalogStore _proxyCatalogStore;
     private readonly SubscriptionStore _subscriptionStore;
+    private readonly SubscriptionCacheStore _subscriptionCacheStore;
     private readonly MihomoApiClient _apiClient;
     private readonly LatencyTestService _latencyTestService;
     private readonly AppSettingsStore _settingsStore;
@@ -28,7 +29,11 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
     private List<ProxyNode> _allNodes = new();
     private IReadOnlyList<ProxyNode> _currentDisplayNodes = Array.Empty<ProxyNode>();
     private Dictionary<string, string> _sourceNames = new(StringComparer.OrdinalIgnoreCase);
-    private int _groupsLoadInProgress;
+    private IReadOnlyList<Dictionary<string, object>> _catalogGroups = Array.Empty<Dictionary<string, object>>();
+    private string? _scopeId;
+    private string _flatGroup = RoutingDefaults.FlatModeSelectionGroup;
+    private bool _scopeDisabled;
+    private bool _loadingGroups;
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _rowsCts;
     private CancellationTokenSource? _selectionSaveCts;
@@ -51,19 +56,17 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
     [ObservableProperty]
     private int _cardsPerRow = 2;
 
-    [ObservableProperty]
-    private bool _useSubscriptionPolicyGroups = true;
-
     public ObservableRangeCollection<ProxyNode> Nodes { get; } = new();
     public ObservableRangeCollection<NodeCardRow> NodeRows { get; } = new();
     public ObservableRangeCollection<string> Groups { get; } = new();
-    public bool ShowSelectionGroup => UseSubscriptionPolicyGroups;
+    public bool ShowSelectionGroup => Groups.Count > 0;
 
     public double SavedScrollOffset { get; set; }
 
     public NodesViewModel(
         ProxyCatalogStore proxyCatalogStore,
         SubscriptionStore subscriptionStore,
+        SubscriptionCacheStore subscriptionCacheStore,
         MihomoApiClient apiClient,
         LatencyTestService latencyTestService,
         AppSettingsStore settingsStore,
@@ -71,14 +74,12 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
     {
         _proxyCatalogStore = proxyCatalogStore;
         _subscriptionStore = subscriptionStore;
+        _subscriptionCacheStore = subscriptionCacheStore;
         _apiClient = apiClient;
         _latencyTestService = latencyTestService;
         _settingsStore = settingsStore;
         _dialogService = dialogService;
         _selectedGroup = settingsStore.Settings.SelectionGroup;
-        _useSubscriptionPolicyGroups = settingsStore.Settings.UseSubscriptionPolicyGroups;
-
-        _ = LoadFromCatalogAsync();
 
         _activeTimer = new DispatcherTimer
         {
@@ -98,19 +99,9 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         RefreshRowsFromCurrent();
     }
 
-    partial void OnUseSubscriptionPolicyGroupsChanged(bool value)
-    {
-        OnPropertyChanged(nameof(ShowSelectionGroup));
-    }
-
     partial void OnSelectedGroupChanged(string value)
     {
-        if (!UseSubscriptionPolicyGroups)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(value))
+        if (_loadingGroups || string.IsNullOrWhiteSpace(value))
         {
             return;
         }
@@ -133,7 +124,7 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
     [RelayCommand]
     private async Task SelectNodeAsync()
     {
-        if (SelectedNode is null)
+        if (SelectedNode is null || _scopeDisabled)
         {
             return;
         }
@@ -153,7 +144,7 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         {
             try
             {
-                await _dialogService.ShowErrorAsync("Selection Failed", "Failed to update proxy selection. Is the core running?");
+                await _dialogService.ShowErrorAsync(DialogError.NodeSelection);
             }
             catch
             {
@@ -222,7 +213,7 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
     [RelayCommand]
     private async Task SelectNodeFromCardAsync(ProxyNode? node)
     {
-        if (node is null)
+        if (node is null || _scopeDisabled)
         {
             return;
         }
@@ -244,7 +235,7 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         {
             try
             {
-                await _dialogService.ShowErrorAsync("Selection Failed", "Failed to update proxy selection. Is the core running?");
+                await _dialogService.ShowErrorAsync(DialogError.NodeSelection);
             }
             catch
             {
@@ -300,14 +291,14 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         double speed;
         try
         {
-            speed = await _latencyTestService.TestProxyDownloadSpeedMbpsAsync(node.Name);
+            speed = await _latencyTestService.TestProxyDownloadSpeedMegabytesPerSecondAsync(node.Name);
         }
         catch
         {
             speed = -1;
         }
 
-        UpdateSpeed(node, speed > 0 ? $"{speed:0.##} Mbps" : "Failed");
+        UpdateSpeed(node, speed > 0 ? $"{speed:0.##} MB/s" : "Failed");
     }
 
     [RelayCommand]
@@ -349,14 +340,14 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
                     double speed;
                     try
                     {
-                        speed = await _latencyTestService.TestProxyDownloadSpeedMbpsAsync(node.Name);
+                        speed = await _latencyTestService.TestProxyDownloadSpeedMegabytesPerSecondAsync(node.Name);
                     }
                     catch
                     {
                         speed = -1;
                     }
 
-                    UpdateSpeed(node, speed > 0 ? $"{speed:0.##} Mbps" : "Failed");
+                    UpdateSpeed(node, speed > 0 ? $"{speed:0.##} MB/s" : "Failed");
                 }
                 finally
                 {
@@ -378,183 +369,89 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         var cts = new CancellationTokenSource();
         _loadCts = cts;
 
-        List<ProxyNode> nodes;
-        Dictionary<string, string> sourceNames;
+        var scopeId = _subscriptionStore.SelectedProfileId;
+        if (!string.Equals(_scopeId, scopeId, StringComparison.OrdinalIgnoreCase))
+        {
+            _rowsCts?.Cancel();
+            Nodes.ReplaceRange(Array.Empty<ProxyNode>());
+            NodeRows.ReplaceRange(Array.Empty<NodeCardRow>());
+            Groups.ReplaceRange(Array.Empty<string>());
+            OnPropertyChanged(nameof(ShowSelectionGroup));
+            SelectedNode = null;
+            _currentDisplayNodes = Array.Empty<ProxyNode>();
+            _scopeId = scopeId;
+        }
+
         try
         {
             var catalog = await Task.Run(() =>
             {
-                var loadedNodes = _proxyCatalogStore.LoadNodes().ToList();
-                var names = _subscriptionStore.Load()
-                    .Where(profile => !string.IsNullOrWhiteSpace(profile.Id))
-                    .GroupBy(profile => profile.Id, StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(
-                        group => group.Key,
-                        group => group.First().Name,
-                        StringComparer.OrdinalIgnoreCase);
+                var profiles = _subscriptionStore.Load();
+                var names = profiles.GroupBy(profile => profile.Id, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(group => group.Key, group => group.First().Name, StringComparer.OrdinalIgnoreCase);
+                var allNodes = _proxyCatalogStore.LoadNodes();
+                var allGroups = _proxyCatalogStore.LoadProxyGroups();
+                var profile = profiles.FirstOrDefault(profile => profile.Id == scopeId);
+                var disabled = profile is { IsEnabled: false };
+                var nodes = scopeId is null ? allNodes
+                    : disabled ? _subscriptionCacheStore.LoadNodes(scopeId)
+                    : allNodes.Where(node => node.SourceId == scopeId).ToList();
+                var groups = scopeId is null ? allGroups
+                    : disabled ? _subscriptionCacheStore.LoadGroups(scopeId)
+                    : allGroups.Where(group => RoutingDefaults.GroupSource(group) == scopeId).ToList();
 
-                return (Nodes: loadedNodes, SourceNames: names);
+                return (Nodes: nodes.ToList(), Groups: groups, SourceNames: names, Disabled: disabled,
+                    FlatGroup: RoutingDefaults.GetFlatGroupName(allNodes, allGroups));
             }, cts.Token);
-            nodes = catalog.Nodes;
-            sourceNames = catalog.SourceNames;
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
 
-        if (cts.IsCancellationRequested)
-        {
-            return;
-        }
-
-        _allNodes = nodes;
-        _sourceNames = sourceNames;
-        RebuildNodeLookup(nodes);
-
-        void ApplyUi()
-        {
             if (cts.IsCancellationRequested || !ReferenceEquals(_loadCts, cts))
             {
                 return;
             }
 
-            Nodes.ReplaceRange(nodes);
+            _allNodes = catalog.Nodes;
+            _catalogGroups = catalog.Groups;
+            _sourceNames = catalog.SourceNames;
+            _flatGroup = catalog.FlatGroup;
+            _scopeDisabled = catalog.Disabled;
+            _activeNodeName = null;
+            _activeGroupName = null;
+            RebuildNodeLookup(_allNodes);
+            Nodes.ReplaceRange(_allNodes);
             LoadGroupsFromCatalog();
+            await RefreshNodeRowsAsync();
+            await UpdateActiveNodeAsync();
         }
-
-        if (Application.Current is null)
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
-            ApplyUi();
         }
-        else
+        finally
         {
-            try
+            if (ReferenceEquals(_loadCts, cts))
             {
-                _ = Application.Current.Dispatcher.BeginInvoke((Action)ApplyUi, DispatcherPriority.Background);
+                _loadCts = null;
             }
-            catch
-            {
-            }
+            cts.Dispose();
         }
-
-        await RefreshNodeRowsAsync().ConfigureAwait(false);
-        await UpdateActiveNodeAsync().ConfigureAwait(false);
     }
 
     private void LoadGroupsFromCatalog()
     {
-        SyncPolicyGroupModeFromSettings();
+        var groupNames = _catalogGroups.Select(RoutingDefaults.GroupName)
+            .Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var preferredGroup = groupNames.FirstOrDefault(name =>
+            name.Equals(_settingsStore.Settings.SelectionGroup, StringComparison.OrdinalIgnoreCase));
 
-        if (!UseSubscriptionPolicyGroups)
-        {
-            var defaultGroup = RoutingDefaults.FlatModeSelectionGroup;
-            Groups.ReplaceRange(new[] { defaultGroup });
-            if (!string.Equals(SelectedGroup, defaultGroup, StringComparison.Ordinal))
-            {
-                SelectedGroup = defaultGroup;
-            }
-            return;
-        }
-
-        static string? GetGroupNameValue(Dictionary<string, object> group)
-        {
-            foreach (var entry in group)
-            {
-                if (entry.Key.Equals("name", StringComparison.OrdinalIgnoreCase))
-                {
-                    return entry.Value?.ToString();
-                }
-            }
-
-            return null;
-        }
-
-        var groupNames = _proxyCatalogStore.LoadProxyGroups()
-            .Select(GetGroupNameValue)
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Select(name => name!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (!string.IsNullOrWhiteSpace(SelectedGroup) && !groupNames.Contains(SelectedGroup, StringComparer.OrdinalIgnoreCase))
-        {
-            groupNames.Insert(0, SelectedGroup);
-        }
-
-        Groups.ReplaceRange(groupNames);
-
-        if (_isActive)
-        {
-            _ = LoadGroupsFromCoreAsync();
-        }
-    }
-
-    private async Task LoadGroupsFromCoreAsync()
-    {
-        if (!UseSubscriptionPolicyGroups)
-        {
-            return;
-        }
-
-        if (Interlocked.Exchange(ref _groupsLoadInProgress, 1) == 1)
-        {
-            return;
-        }
-
+        _loadingGroups = true;
         try
         {
-            var snapshot = await _apiClient.GetProxiesAsync().ConfigureAwait(false);
-            if (snapshot is null)
-            {
-                return;
-            }
-
-            var groupNames = snapshot.Proxies.Values
-                .Where(proxy => proxy.All.Count > 0)
-                .Select(proxy => proxy.Name)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (!string.IsNullOrWhiteSpace(SelectedGroup)
-                && !groupNames.Contains(SelectedGroup, StringComparer.OrdinalIgnoreCase))
-            {
-                groupNames.Insert(0, SelectedGroup);
-            }
-
-            if (!_isActive)
-            {
-                return;
-            }
-
-            void Apply()
-            {
-                if (_isActive)
-                {
-                    Groups.ReplaceRange(groupNames);
-                }
-            }
-
-            if (Application.Current is null)
-            {
-                Apply();
-                return;
-            }
-
-            try
-            {
-                await Application.Current.Dispatcher.InvokeAsync(Apply, DispatcherPriority.Background);
-            }
-            catch
-            {
-            }
+            Groups.ReplaceRange(groupNames);
+            SelectedGroup = preferredGroup ?? groupNames.FirstOrDefault() ?? string.Empty;
+            OnPropertyChanged(nameof(ShowSelectionGroup));
         }
         finally
         {
-            Interlocked.Exchange(ref _groupsLoadInProgress, 0);
+            _loadingGroups = false;
         }
     }
 
@@ -590,7 +487,7 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
             _currentDisplayNodes = filtered;
             NodeRows.ReplaceRange(rows);
             RebuildDisplayLookup(filtered);
-            if (SelectedNode is null || (filtered.Count > 0 && !filtered.Contains(SelectedNode)))
+            if (SelectedNode is null || !filtered.Contains(SelectedNode))
             {
                 SelectedNode = filtered.Count > 0 ? filtered[0] : null;
             }
@@ -624,19 +521,11 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         }
     }
 
-    private string GetGroupName()
-    {
-        if (!UseSubscriptionPolicyGroups)
-        {
-            return RoutingDefaults.FlatModeSelectionGroup;
-        }
-
-        return string.IsNullOrWhiteSpace(SelectedGroup) ? _settingsStore.Settings.SelectionGroup : SelectedGroup;
-    }
+    private string GetGroupName() => string.IsNullOrWhiteSpace(SelectedGroup) ? _flatGroup : SelectedGroup;
 
     private void QueueSelectionGroupSave(string selectionGroup)
     {
-        if (!UseSubscriptionPolicyGroups)
+        if (_scopeDisabled)
         {
             return;
         }
@@ -684,62 +573,41 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         string groupName,
         CancellationToken cancellationToken)
     {
-        if (!UseSubscriptionPolicyGroups)
+        var group = _catalogGroups.FirstOrDefault(group => RoutingDefaults.GroupName(group) == groupName);
+        if (group is null)
         {
             return nodes.ToList();
         }
 
-        if (nodes.Count == 0 || string.IsNullOrWhiteSpace(groupName))
-        {
-            return nodes.ToList();
-        }
-
-        try
+        var configuredMembers = RoutingDefaults.Names(group, "proxies").ToList();
+        var groups = _catalogGroups.Select(RoutingDefaults.GroupName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var members = configuredMembers;
+        if (!_scopeDisabled)
         {
             var snapshot = await _apiClient.GetProxiesAsync(cancellationToken).ConfigureAwait(false);
-            if (snapshot is null
-                || !snapshot.Proxies.TryGetValue(groupName, out var groupProxy)
-                || groupProxy.All.Count == 0)
+            if (snapshot?.Proxies.TryGetValue(groupName, out var runningGroup) == true && runningGroup.All.Count > 0)
             {
-                return nodes.ToList();
+                members = runningGroup.All.ToList();
             }
-
-            var result = new List<ProxyNode>(groupProxy.All.Count);
-            foreach (var name in groupProxy.All)
-            {
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    continue;
-                }
-
-                if (_nodeLookup.TryGetValue(name, out var matches) && matches.Count > 0)
-                {
-                    result.Add(matches[0]);
-                    continue;
-                }
-
-                var type = snapshot.Proxies.TryGetValue(name, out var proxy) ? proxy.Type : string.Empty;
-                if (string.IsNullOrWhiteSpace(type))
-                {
-                    type = name.Equals("DIRECT", StringComparison.OrdinalIgnoreCase) ? "DIRECT"
-                        : name.Equals("REJECT", StringComparison.OrdinalIgnoreCase) ? "REJECT"
-                        : "ProxyGroup";
-                }
-
-                result.Add(new ProxyNode
-                {
-                    Name = name,
-                    Type = type
-                });
-            }
-
-            return result;
         }
-        catch
+
+        var lookup = nodes.ToLookup(node => node.Name, StringComparer.OrdinalIgnoreCase);
+        var result = new List<ProxyNode>(members.Count);
+        foreach (var name in members.Distinct(StringComparer.OrdinalIgnoreCase))
         {
+            var node = lookup[name].FirstOrDefault();
+            if (node is not null)
+            {
+                result.Add(node);
+            }
+            else if (groups.Contains(name) || (configuredMembers.Contains(name, StringComparer.OrdinalIgnoreCase)
+                     && name is "DIRECT" or "REJECT" or "REJECT-DROP" or "PASS" or "COMPATIBLE"))
+            {
+                result.Add(new ProxyNode { Name = name, Type = groups.Contains(name) ? "ProxyGroup" : name });
+            }
         }
 
-        return nodes.ToList();
+        return result;
     }
 
     private List<NodeCardRow> BuildRows(IReadOnlyList<ProxyNode> nodes, int cardsPerRow)
@@ -846,7 +714,7 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
 
     private async Task UpdateActiveNodeAsync()
     {
-        if (!_isActive)
+        if (!_isActive || _scopeDisabled)
         {
             return;
         }
@@ -931,14 +799,9 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
             return;
         }
 
-        SyncPolicyGroupModeFromSettings();
-        LoadGroupsFromCatalog();
-        _ = RefreshNodeRowsAsync();
-
         _isActive = true;
         _activeTimer.Start();
-        _ = UpdateActiveNodeAsync();
-        _ = LoadGroupsFromCoreAsync();
+        _ = LoadFromCatalogAsync();
     }
 
     public void OnPageDeactivated()
@@ -1032,15 +895,6 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         }
 
         Application.Current.Dispatcher.BeginInvoke(() => node.SpeedText = speedText, DispatcherPriority.Background);
-    }
-
-    private void SyncPolicyGroupModeFromSettings()
-    {
-        var useSubscriptionPolicyGroups = _settingsStore.Settings.UseSubscriptionPolicyGroups;
-        if (UseSubscriptionPolicyGroups != useSubscriptionPolicyGroups)
-        {
-            UseSubscriptionPolicyGroups = useSubscriptionPolicyGroups;
-        }
     }
 
     public ProxyNode? GetActiveNode()

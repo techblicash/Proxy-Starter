@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System;
 using System.IO;
 using System.Linq;
-using System.Net;
 using System.Text;
 using System.Text.Json;
 using ProxyStarter.App.Models;
@@ -21,18 +20,12 @@ public sealed class SubscriptionCacheStore
     private readonly ISerializer _serializer;
     private readonly IDeserializer _deserializer;
     private readonly AppSettingsStore _settingsStore;
-    private readonly RulesStore _rulesStore;
-    private readonly DefaultRulesService _defaultRulesService;
     private readonly object _sync = new();
 
     public SubscriptionCacheStore(
-        AppSettingsStore settingsStore,
-        RulesStore rulesStore,
-        DefaultRulesService defaultRulesService)
+        AppSettingsStore settingsStore)
     {
         _settingsStore = settingsStore;
-        _rulesStore = rulesStore;
-        _defaultRulesService = defaultRulesService;
         _cacheDirectory = Path.Combine(AppPaths.DataDirectory, "subscriptions");
         _serializer = new SerializerBuilder().Build();
         _deserializer = new DeserializerBuilder().Build();
@@ -150,7 +143,7 @@ public sealed class SubscriptionCacheStore
             var rules = LoadRules(profileId);
             if (rules.Count > 0 || !root.ContainsKey("rules"))
             {
-                root["rules"] = rules.Count > 0 ? rules : BuildRules(_settingsStore.Settings);
+                root["rules"] = rules;
             }
 
             return _serializer.Serialize(root);
@@ -285,7 +278,7 @@ public sealed class SubscriptionCacheStore
                     {
                         if (string.IsNullOrWhiteSpace(text))
                         {
-                            continue;
+                            return Array.Empty<string>();
                         }
 
                         return text
@@ -454,7 +447,6 @@ public sealed class SubscriptionCacheStore
             root["secret"] = settings.ApiSecret;
         }
 
-        root["rules"] = BuildRules(settings);
     }
 
     private void EnsureDefaults(Dictionary<string, object> root, AppSettings settings)
@@ -509,163 +501,6 @@ public sealed class SubscriptionCacheStore
         {
             root[key] = value;
         }
-    }
-
-    private IReadOnlyList<string> BuildRules(AppSettings settings)
-    {
-        var selectionGroup = RoutingDefaults.ResolveSelectionGroup(settings.SelectionGroup, settings.UseSubscriptionPolicyGroups);
-        var rules = _rulesStore.LoadRules().ToList();
-        if (rules.Count == 0 && !settings.UseSubscriptionPolicyGroups)
-        {
-            rules = _defaultRulesService.GetDefaultRules(selectionGroup).ToList();
-        }
-
-        var blockedRules = BuildBlockedRules(settings.BlockedSites);
-        if (blockedRules.Count > 0)
-        {
-            rules.InsertRange(0, blockedRules);
-        }
-
-        if (!settings.UseSubscriptionPolicyGroups)
-        {
-            rules = NormalizeRulesForFlatMode(rules, selectionGroup);
-        }
-
-        if (rules.Count == 0)
-        {
-            return new List<string> { $"MATCH,{selectionGroup}" };
-        }
-
-        var hasMatch = rules.Any(rule => rule.StartsWith("MATCH,", StringComparison.OrdinalIgnoreCase));
-        if (!hasMatch)
-        {
-            rules.Add($"MATCH,{selectionGroup}");
-        }
-
-        return rules;
-    }
-
-    private static List<string> NormalizeRulesForFlatMode(List<string> rules, string selectionGroup)
-    {
-        var normalized = new List<string>(rules.Count);
-        foreach (var raw in rules)
-        {
-            if (string.IsNullOrWhiteSpace(raw))
-            {
-                continue;
-            }
-
-            var parts = raw.Split(',');
-            if (parts.Length < 2)
-            {
-                normalized.Add(raw);
-                continue;
-            }
-
-            var head = parts[0].Trim();
-            var policyIndex = head.Equals("MATCH", StringComparison.OrdinalIgnoreCase) ? 1 : 2;
-            if (policyIndex >= parts.Length)
-            {
-                normalized.Add(raw);
-                continue;
-            }
-
-            var policy = parts[policyIndex].Trim();
-            var keepPolicy =
-                policy.Equals("DIRECT", StringComparison.OrdinalIgnoreCase)
-                || policy.Equals("REJECT", StringComparison.OrdinalIgnoreCase)
-                || policy.Equals(selectionGroup, StringComparison.Ordinal);
-
-            if (!keepPolicy)
-            {
-                parts[policyIndex] = selectionGroup;
-            }
-
-            normalized.Add(string.Join(",", parts));
-        }
-
-        return normalized;
-    }
-
-    private static List<string> BuildBlockedRules(string? blockedSites)
-    {
-        if (string.IsNullOrWhiteSpace(blockedSites))
-        {
-            return new List<string>();
-        }
-
-        var rules = new List<string>();
-        var lines = blockedSites
-            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Trim())
-            .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith('#'));
-
-        foreach (var line in lines)
-        {
-            if (line.Contains(','))
-            {
-                rules.Add(line);
-                continue;
-            }
-
-            var host = ExtractHost(line);
-            if (TryFormatIpRule(host, out var ipRule))
-            {
-                rules.Add(ipRule);
-                continue;
-            }
-
-            if (!string.IsNullOrWhiteSpace(host))
-            {
-                rules.Add($"DOMAIN-SUFFIX,{host},REJECT");
-            }
-        }
-
-        return rules;
-    }
-
-    private static string ExtractHost(string input)
-    {
-        var trimmed = input.Trim();
-        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.Host))
-        {
-            return uri.Host;
-        }
-
-        if (Uri.TryCreate("http://" + trimmed, UriKind.Absolute, out var guess) && !string.IsNullOrWhiteSpace(guess.Host))
-        {
-            return guess.Host;
-        }
-
-        return trimmed.TrimStart('*', '.');
-    }
-
-    private static bool TryFormatIpRule(string value, out string rule)
-    {
-        rule = string.Empty;
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        var trimmed = value.Trim();
-        if (trimmed.Contains('/'))
-        {
-            var parts = trimmed.Split('/', 2);
-            if (IPAddress.TryParse(parts[0], out _) && int.TryParse(parts[1], out var prefix))
-            {
-                rule = $"IP-CIDR,{parts[0]}/{prefix},REJECT";
-                return true;
-            }
-        }
-
-        if (IPAddress.TryParse(trimmed, out _))
-        {
-            rule = $"IP-CIDR,{trimmed}/32,REJECT";
-            return true;
-        }
-
-        return false;
     }
 
     private static void Try(System.Action action, string context)

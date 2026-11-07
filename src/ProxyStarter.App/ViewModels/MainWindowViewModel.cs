@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -80,9 +80,7 @@ public partial class MainWindowViewModel : ObservableObject
                 return;
             }
 
-            await _dialogService.ShowErrorAsync(
-                "Elevation Failed",
-                "无法以管理员权限重启应用。请手动右键“以管理员身份运行”。");
+            await _dialogService.ShowErrorAsync(DialogError.Elevation);
             return;
         }
 
@@ -93,7 +91,7 @@ public partial class MainWindowViewModel : ObservableObject
         catch (Exception ex)
         {
             CrashLogger.Log(ex, "MainWindowViewModel: Toggle core");
-            await _dialogService.ShowErrorAsync("Core Operation Failed", ex.Message);
+            await _dialogService.ShowErrorAsync(DialogError.CoreOperation, ex.Message);
         }
     }
 

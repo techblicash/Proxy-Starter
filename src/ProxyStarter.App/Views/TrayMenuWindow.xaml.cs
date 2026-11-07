@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -100,7 +100,7 @@ public partial class TrayMenuWindow : FluentWindow
         _filteredNodes.Clear();
 
         var settings = _settingsStore.Settings;
-        var groupName = RoutingDefaults.ResolveSelectionGroup(settings.SelectionGroup, settings.UseSubscriptionPolicyGroups);
+        var groupName = _proxyCatalogStore.ResolveSelectionGroup(settings);
         _currentSelectionGroup = groupName;
         NodesGroupText.Text = string.IsNullOrWhiteSpace(groupName) ? "" : groupName;
         if (string.IsNullOrWhiteSpace(groupName))
@@ -280,9 +280,7 @@ public partial class TrayMenuWindow : FluentWindow
         }
 
         var groupName = string.IsNullOrWhiteSpace(_currentSelectionGroup)
-            ? RoutingDefaults.ResolveSelectionGroup(
-                _settingsStore.Settings.SelectionGroup,
-                _settingsStore.Settings.UseSubscriptionPolicyGroups)
+            ? _proxyCatalogStore.ResolveSelectionGroup(_settingsStore.Settings)
             : _currentSelectionGroup;
         if (string.IsNullOrWhiteSpace(groupName))
         {

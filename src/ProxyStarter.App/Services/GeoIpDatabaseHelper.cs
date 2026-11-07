@@ -12,6 +12,13 @@ public static class GeoIpDatabaseHelper
         EnsureDatabaseFile(configPath, "geoip.metadb");
     }
 
+    public static bool HasDatabase(string? configPath = null)
+    {
+        var directory = GetTargetDirectory(configPath);
+        return File.Exists(Path.Combine(directory, "geoip.metadb"))
+            || File.Exists(Path.Combine(directory, "Country.mmdb"));
+    }
+
     private static string GetTargetDirectory(string? configPath)
     {
         if (!string.IsNullOrWhiteSpace(configPath))

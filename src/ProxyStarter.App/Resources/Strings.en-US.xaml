@@ -60,7 +60,7 @@
     <sys:String x:Key="Text_LatencyMs">Latency (ms)</sys:String>
 
     <sys:String x:Key="Text_RoutingMode">Routing Mode</sys:String>
-    <sys:String x:Key="Text_RulesHint">One rule per line. Example: DOMAIN-SUFFIX,google.com,Auto</sys:String>
+    <sys:String x:Key="Text_RulesHint">In Rule mode, custom rules take priority over the built-in mainland China bypass rules. Use one rule per line, for example DOMAIN-SUFFIX,example.com,DIRECT. MATCH sets the final fallback.</sys:String>
     <sys:String x:Key="Text_SaveRules">Save Rules</sys:String>
 
     <sys:String x:Key="Text_Clear">Clear</sys:String>
@@ -133,4 +133,55 @@
     <sys:String x:Key="Text_EditFile">Edit File</sys:String>
     <sys:String x:Key="Text_EditSubscriptionFile">Edit Subscription File</sys:String>
     <sys:String x:Key="Text_SubscriptionFileHint">Edit the raw subscription content. Saving will update nodes and groups.</sys:String>
+
+    <sys:String x:Key="DialogOk">OK</sys:String>
+    <sys:String x:Key="DialogClose">Close</sys:String>
+    <sys:String x:Key="DialogYes">Yes</sys:String>
+    <sys:String x:Key="DialogNo">No</sys:String>
+    <sys:String x:Key="DialogDetails">Technical details</sys:String>
+    <sys:String x:Key="Text_CustomRules">Custom rules</sys:String>
+    <sys:String x:Key="Text_RulesSaved">Rules saved</sys:String>
+    <sys:String x:Key="Text_RulesRestartHint">Restart the proxy core to apply the updated rules.</sys:String>
+    <sys:String x:Key="Error_CoreNotFound_Title">Core Not Found</sys:String>
+    <sys:String x:Key="Error_CoreNotFound_Body">The core executable could not be found. Update the core path in Settings.</sys:String>
+    <sys:String x:Key="Error_CoreOperation_Title">Core Operation Failed</sys:String>
+    <sys:String x:Key="Error_CoreOperation_Body">Could not start or stop the proxy core.</sys:String>
+    <sys:String x:Key="Error_NetworkSettings_Title">Network Settings Failed</sys:String>
+    <sys:String x:Key="Error_NetworkSettings_Body">Could not apply network settings.</sys:String>
+    <sys:String x:Key="Error_Elevation_Title">Elevation Failed</sys:String>
+    <sys:String x:Key="Error_Elevation_Body">Could not restart with administrator privileges. Run the app as administrator.</sys:String>
+    <sys:String x:Key="Error_SubscriptionDownload_Title">Subscription Download Failed</sys:String>
+    <sys:String x:Key="Error_SubscriptionDownload_Body">Could not fetch the subscription. Check the address and network connection.</sys:String>
+    <sys:String x:Key="Error_NoSubscription_Title">No Subscription Selected</sys:String>
+    <sys:String x:Key="Error_NoSubscription_Body">Select a subscription first.</sys:String>
+    <sys:String x:Key="Error_NoSubscriptionCache_Title">No Cached Subscription</sys:String>
+    <sys:String x:Key="Error_NoSubscriptionCache_Body">Update the subscription first.</sys:String>
+    <sys:String x:Key="Error_SubscriptionSave_Title">Subscription Save Failed</sys:String>
+    <sys:String x:Key="Error_SubscriptionSave_Body">Could not save the subscription file.</sys:String>
+    <sys:String x:Key="Error_ModeSave_Title">Mode Save Failed</sys:String>
+    <sys:String x:Key="Error_ModeSave_Body">Could not save the routing mode.</sys:String>
+    <sys:String x:Key="Error_ModeUpdate_Title">Mode Update Failed</sys:String>
+    <sys:String x:Key="Error_ModeUpdate_Body">Could not change the routing mode. Check whether the core is running.</sys:String>
+    <sys:String x:Key="Error_RulesSave_Title">Rules Save Failed</sys:String>
+    <sys:String x:Key="Error_RulesSave_Body">Could not save custom rules.</sys:String>
+    <sys:String x:Key="Error_NodeSelection_Title">Selection Failed</sys:String>
+    <sys:String x:Key="Error_NodeSelection_Body">Could not switch the node or group. Check whether the core is running and the target is available.</sys:String>
+    <sys:String x:Key="Error_QosApply_Title">QoS Apply Failed</sys:String>
+    <sys:String x:Key="Error_QosApply_Body">Could not apply the speed limit.</sys:String>
+    <sys:String x:Key="Error_RestartRequired_Title">Restart Required</sys:String>
+    <sys:String x:Key="Error_RestartRequired_Body">Settings were saved. Restart as administrator to apply the TUN changes.</sys:String>
+    <sys:String x:Key="Error_SettingsSave_Title">Settings Save Failed</sys:String>
+    <sys:String x:Key="Error_SettingsSave_Body">Could not save or apply settings.</sys:String>
+    <sys:String x:Key="Error_UpdateFeedMissing_Title">Update Feed Missing</sys:String>
+    <sys:String x:Key="Error_UpdateFeedMissing_Body">Configure the update feed URL in Settings.</sys:String>
+    <sys:String x:Key="Error_UpdateUnavailable_Title">Updater Unavailable</sys:String>
+    <sys:String x:Key="Error_UpdateUnavailable_Body">Install the app with the Windows installer to use the built-in updater.</sys:String>
+    <sys:String x:Key="Error_UpdateCheck_Title">Update Check Failed</sys:String>
+    <sys:String x:Key="Error_UpdateCheck_Body">Could not check for or apply an update.</sys:String>
+    <sys:String x:Key="Error_CoreDownload_Title">Core Download Failed</sys:String>
+    <sys:String x:Key="Error_CoreDownload_Body">Could not download or install the proxy core.</sys:String>
+    <sys:String x:Key="Text_LocateActiveNode">Locate active node</sys:String>
+    <sys:String x:Key="Text_NodeSearchPlaceholder">Search node name or address</sys:String>
+    <sys:String x:Key="Text_FindNode">Find next</sys:String>
+    <sys:String x:Key="Text_NoMatchingNodes">No matching nodes</sys:String>
 </ResourceDictionary>

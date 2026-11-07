@@ -18,9 +18,7 @@ public sealed class MihomoCoreAdapter : IProxyCoreAdapter
 
     public string EnsureConfig(AppSettings settings)
     {
-        var configPath = _configWriter.EnsureConfig(settings);
-        GeoIpDatabaseHelper.EnsureDatabase(configPath);
-        return configPath;
+        return _configWriter.EnsureConfig(settings);
     }
 
     public MihomoLaunchOptions CreateLaunchOptions(AppSettings settings, string configPath)

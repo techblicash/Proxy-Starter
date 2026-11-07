@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System;
 using System.IO;
 using System.Text.Json;
@@ -15,6 +15,8 @@ public sealed class SubscriptionStore
 
     private readonly string _subscriptionsPath;
     private readonly object _sync = new();
+
+    public string? SelectedProfileId { get; set; }
 
     public SubscriptionStore()
     {

@@ -63,9 +63,6 @@ public partial class SettingsViewModel : ObservableObject
     private int _logRetentionCount;
 
     [ObservableProperty]
-    private bool _useSubscriptionPolicyGroups;
-
-    [ObservableProperty]
     private bool _autoStart;
 
     [ObservableProperty]
@@ -172,7 +169,6 @@ public partial class SettingsViewModel : ObservableObject
         _tunEnabled = settings.TunEnabled;
         _logLevel = settings.LogLevel;
         _logRetentionCount = settings.LogRetentionCount;
-        _useSubscriptionPolicyGroups = settings.UseSubscriptionPolicyGroups;
         _autoStart = _autoStartService.IsEnabled();
         _updateFeedUrl = settings.UpdateFeedUrl ?? string.Empty;
         _currentVersion = _softwareUpdateService.CurrentVersion;
@@ -224,8 +220,7 @@ public partial class SettingsViewModel : ObservableObject
                 || settings.AllowLan != AllowLan
                 || settings.LogLevel != LogLevel
                 || settings.BlockedSites != BlockedSites
-                || settings.TunEnabled != TunEnabled
-                || settings.UseSubscriptionPolicyGroups != UseSubscriptionPolicyGroups;
+                || settings.TunEnabled != TunEnabled;
             var needsLogReconnect =
                 settings.LogLevel != LogLevel
                 || settings.ApiSecret != ApiSecret
@@ -243,7 +238,6 @@ public partial class SettingsViewModel : ObservableObject
             settings.TunEnabled = TunEnabled;
             settings.LogLevel = LogLevel;
             settings.LogRetentionCount = Math.Clamp(LogRetentionCount, 1, MihomoLogService.MaxRetentionLimit);
-            settings.UseSubscriptionPolicyGroups = UseSubscriptionPolicyGroups;
             settings.AutoStart = AutoStart;
             settings.UpdateFeedUrl = UpdateFeedUrl ?? string.Empty;
             settings.Theme = Theme;
@@ -270,7 +264,7 @@ public partial class SettingsViewModel : ObservableObject
             var qosResult = await _qosPolicyService.ApplyAsync(settings);
             if (!qosResult.IsSuccess)
             {
-                await _dialogService.ShowErrorAsync("QoS Apply Failed", qosResult.Message);
+                await _dialogService.ShowErrorAsync(DialogError.QosApply, qosResult.Message);
             }
 
             if (wasRunning && needsRestart)
@@ -284,9 +278,7 @@ public partial class SettingsViewModel : ObservableObject
                         return;
                     }
 
-                    await _dialogService.ShowErrorAsync(
-                        "Restart Required",
-                        "TUN is enabled. Settings were saved. Restart as administrator to apply core changes.");
+                    await _dialogService.ShowErrorAsync(DialogError.RestartRequired);
                     return;
                 }
 
@@ -297,7 +289,7 @@ public partial class SettingsViewModel : ObservableObject
         catch (Exception ex)
         {
             CrashLogger.Log(ex, "SettingsViewModel: Save");
-            await _dialogService.ShowErrorAsync("Settings Save Failed", ex.Message);
+            await _dialogService.ShowErrorAsync(DialogError.SettingsSave, ex.Message);
             Reload();
         }
     }
@@ -323,7 +315,6 @@ public partial class SettingsViewModel : ObservableObject
             TunEnabled = settings.TunEnabled;
             LogLevel = settings.LogLevel;
             LogRetentionCount = settings.LogRetentionCount;
-            UseSubscriptionPolicyGroups = settings.UseSubscriptionPolicyGroups;
             AutoStart = _autoStartService.IsEnabled();
             UpdateFeedUrl = settings.UpdateFeedUrl ?? string.Empty;
             CurrentVersion = _softwareUpdateService.CurrentVersion;
@@ -388,10 +379,10 @@ public partial class SettingsViewModel : ObservableObject
             switch (result.Status)
             {
                 case ProxyStarter.App.Services.SoftwareUpdateStatus.FeedNotConfigured:
-                    await _dialogService.ShowErrorAsync("Update Feed Missing", result.Message);
+                    await _dialogService.ShowErrorAsync(DialogError.UpdateFeedMissing);
                     break;
                 case ProxyStarter.App.Services.SoftwareUpdateStatus.NotInstalled:
-                    await _dialogService.ShowInfoAsync("Updater Unavailable", result.Message);
+                    await _dialogService.ShowErrorAsync(DialogError.UpdateUnavailable);
                     break;
                 case ProxyStarter.App.Services.SoftwareUpdateStatus.NoUpdate:
                     await _dialogService.ShowInfoAsync("No Updates", result.Message);
@@ -425,7 +416,7 @@ public partial class SettingsViewModel : ObservableObject
         {
             CrashLogger.Log(ex, "SettingsViewModel: Check software update");
             SetSoftwareUpdateStatus("Update check failed.");
-            await _dialogService.ShowErrorAsync("Update Check Failed", ex.Message);
+            await _dialogService.ShowErrorAsync(DialogError.UpdateCheck, ex.Message);
         }
         finally
         {
@@ -481,7 +472,7 @@ public partial class SettingsViewModel : ObservableObject
         {
             CrashLogger.Log(ex, "SettingsViewModel: Download core");
             CoreDownloadStatus = BuildInstalledCoreStatus();
-            await _dialogService.ShowErrorAsync("Core Download Failed", ex.Message);
+            await _dialogService.ShowErrorAsync(DialogError.CoreDownload, ex.Message);
         }
         finally
         {
@@ -516,9 +507,7 @@ public partial class SettingsViewModel : ObservableObject
             return true;
         }
 
-        await _dialogService.ShowErrorAsync(
-            "Elevation Failed",
-            "Could not restart with administrator privileges. Please run the app as Administrator manually.");
+        await _dialogService.ShowErrorAsync(DialogError.Elevation);
         return false;
     }
 }

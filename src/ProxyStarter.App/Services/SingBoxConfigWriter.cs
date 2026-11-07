@@ -16,24 +16,6 @@ public sealed class SingBoxConfigWriter
         WriteIndented = true
     };
 
-    private static readonly string[] DefaultDirectDomainSuffixes =
-    {
-        "localhost",
-        "local",
-        "lan",
-        "cn"
-    };
-
-    private static readonly string[] DefaultDirectIpCidrs =
-    {
-        "127.0.0.0/8",
-        "10.0.0.0/8",
-        "172.16.0.0/12",
-        "192.168.0.0/16",
-        "::1/128",
-        "fc00::/7"
-    };
-
     private static readonly string[] DefaultBlockDomainSuffixes =
     {
         "doubleclick.net",
@@ -82,25 +64,59 @@ public sealed class SingBoxConfigWriter
             }
         }
 
-        var selectionTag = proxyTags.Count > 0
-            ? UniqueTag(RoutingDefaults.ResolveSelectionGroup(settings.SelectionGroup, settings.UseSubscriptionPolicyGroups), usedTags)
-            : "direct";
-
-        if (proxyTags.Count > 0)
+        var groups = _proxyCatalogStore.LoadProxyGroups();
+        var groupTags = groups.Select(RoutingDefaults.GroupName).Where(usedTags.Add).ToList();
+        var nodes = _proxyCatalogStore.LoadNodes();
+        var flatTags = RoutingDefaults.GetFlatNodes(nodes, groups)
+            .Select(node => node.Name).Where(proxyTags.Contains).Distinct().ToList();
+        var flatGroup = RoutingDefaults.GetFlatGroupName(nodes, groups);
+        if (flatTags.Count > 0)
         {
-            var selectorOutbounds = new List<string>(proxyTags.Count + 2);
-            selectorOutbounds.AddRange(proxyTags);
-            selectorOutbounds.Add("direct");
-            selectorOutbounds.Add("block");
-
-            outbounds.Insert(0, new Dictionary<string, object>
-            {
-                ["type"] = "selector",
-                ["tag"] = selectionTag,
-                ["outbounds"] = selectorOutbounds,
-                ["default"] = proxyTags[0]
-            });
+            flatTags.AddRange(new[] { "direct", "block" });
+            outbounds.Add(BuildGroup(flatGroup, flatTags));
+            usedTags.Add(flatGroup);
         }
+
+        foreach (var group in groups.Where(group => groupTags.Contains(RoutingDefaults.GroupName(group))))
+        {
+            var tag = RoutingDefaults.GroupName(group);
+            var members = RoutingDefaults.Names(group, "proxies")
+                .Select(name => MapPolicy(name, "direct", usedTags))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (members.Count == 0)
+            {
+                members.Add("direct");
+            }
+
+            var outbound = BuildGroup(tag, members);
+            var type = GetString(group, "type");
+            if (type.Equals("url-test", StringComparison.OrdinalIgnoreCase))
+            {
+                outbound["type"] = "urltest";
+                outbound.Remove("default");
+                AddIfNotBlank(outbound, "url", GetString(group, "url"));
+                var interval = GetInt(group, "interval");
+                if (interval > 0)
+                {
+                    outbound["interval"] = $"{interval}s";
+                }
+                var tolerance = GetInt(group, "tolerance");
+                if (tolerance > 0)
+                {
+                    outbound["tolerance"] = tolerance;
+                }
+            }
+            else if (members.Contains(GetString(group, "default-selected")))
+            {
+                outbound["default"] = GetString(group, "default-selected");
+            }
+
+            outbounds.Add(outbound);
+        }
+
+        var selectionTag = groupTags.FirstOrDefault() ?? (flatTags.Count > 0 ? flatGroup : "direct");
+        var globalTag = usedTags.Contains(settings.SelectionGroup) ? settings.SelectionGroup : selectionTag;
 
         outbounds.Add(new Dictionary<string, object>
         {
@@ -122,7 +138,16 @@ public sealed class SingBoxConfigWriter
             },
             ["inbounds"] = BuildInbounds(settings),
             ["outbounds"] = outbounds,
-            ["route"] = BuildRoute(settings, selectionTag)
+            ["route"] = BuildRoute(settings, selectionTag, globalTag, usedTags),
+            ["experimental"] = new Dictionary<string, object>
+            {
+                ["clash_api"] = new Dictionary<string, object>
+                {
+                    ["external_controller"] = $"127.0.0.1:{settings.ApiPort}",
+                    ["secret"] = settings.ApiSecret,
+                    ["default_mode"] = settings.Mode
+                }
+            }
         };
     }
 
@@ -143,67 +168,85 @@ public sealed class SingBoxConfigWriter
         return inbounds;
     }
 
-    private Dictionary<string, object> BuildRoute(AppSettings settings, string finalOutbound)
+    private static Dictionary<string, object> BuildGroup(string tag, IReadOnlyList<string> members)
     {
-        var mode = string.IsNullOrWhiteSpace(settings.Mode)
-            ? "global"
-            : settings.Mode.Trim().ToLowerInvariant();
-
-        if (mode == "direct")
+        return new Dictionary<string, object>
         {
-            return new Dictionary<string, object>
-            {
-                ["final"] = "direct"
-            };
-        }
+            ["type"] = "selector",
+            ["tag"] = tag,
+            ["outbounds"] = members,
+            ["default"] = members[0]
+        };
+    }
 
-        if (mode == "global")
+    private Dictionary<string, object> BuildRoute(
+        AppSettings settings, string fallback, string globalTag, HashSet<string> targets)
+    {
+        var rules = new List<Dictionary<string, object>>
         {
-            return new Dictionary<string, object>
-            {
-                ["final"] = finalOutbound
-            };
-        }
-
-        var rules = new List<Dictionary<string, object>>();
+            new() { ["clash_mode"] = "direct", ["outbound"] = "direct" },
+            new() { ["clash_mode"] = "global", ["outbound"] = globalTag }
+        };
         AddBlockedSiteRules(rules, settings.BlockedSites);
-        AddDomainSuffixRule(rules, DefaultBlockDomainSuffixes, "block");
-        AddIpCidrRule(rules, DefaultDirectIpCidrs, "direct");
-        AddDomainSuffixRule(rules, DefaultDirectDomainSuffixes, "direct");
-
-        foreach (var rule in LoadRoutingRules(settings, finalOutbound))
+        var defaultRules = _defaultRulesService.Rules;
+        var customRules = _rulesStore.LoadRules();
+        var subscriptionRules = _proxyCatalogStore.LoadRules();
+        var finalOutbound = fallback;
+        var mainlandDomains = new Dictionary<string, object>();
+        foreach (var group in defaultRules.Where(rule => rule.StartsWith("DOMAIN", StringComparison.Ordinal))
+                     .Select(rule => rule.Split(',')).GroupBy(parts => parts[0].ToLowerInvariant().Replace('-', '_')))
         {
-            if (TryConvertClashRule(rule, finalOutbound, out var converted))
+            mainlandDomains[group.Key] = group.Select(parts => parts[1]).ToArray();
+        }
+
+        var mainlandIps = defaultRules.Where(rule => rule.StartsWith("IP-CIDR", StringComparison.Ordinal))
+            .Select(rule => rule.Split(',')[1]).ToArray();
+
+        void AddRules(IEnumerable<string> source)
+        {
+            foreach (var rule in source)
             {
-                rules.Add(converted);
+                var parts = RoutingDefaults.SplitRule(rule);
+                if (parts.Count >= 2 && RoutingDefaults.IsMatch(rule))
+                {
+                    finalOutbound = MapPolicy(parts[1].Trim(), fallback, targets);
+                    continue;
+                }
+
+                if (parts.Count >= 3 && parts[1].Trim().Equals("CN", StringComparison.OrdinalIgnoreCase))
+                {
+                    var outbound = MapPolicy(parts[2].Trim(), fallback, targets);
+                    switch (parts[0].Trim().ToUpperInvariant())
+                    {
+                        case "GEOIP":
+                            AddIpCidrRule(rules, mainlandIps, outbound);
+                            continue;
+                        case "GEOSITE":
+                            rules.Add(new Dictionary<string, object>(mainlandDomains) { ["outbound"] = outbound });
+                            continue;
+                    }
+
+                }
+
+                if (TryConvertClashRule(rule, fallback, out var converted, targets))
+                {
+                    rules.Add(converted);
+                }
             }
         }
+
+        AddRules(customRules.Where(rule => !RoutingDefaults.IsMatch(rule)));
+        AddDomainSuffixRule(rules, DefaultBlockDomainSuffixes, "block");
+        rules.Add(new Dictionary<string, object>(mainlandDomains) { ["outbound"] = "direct" });
+        AddIpCidrRule(rules, mainlandIps, "direct");
+        AddRules(RoutingDefaults.ComposeRules(customRules, Array.Empty<string>(), subscriptionRules, fallback)
+            .Skip(customRules.Count(rule => !RoutingDefaults.IsMatch(rule))));
 
         return new Dictionary<string, object>
         {
             ["rules"] = rules,
             ["final"] = finalOutbound
         };
-    }
-
-    private IReadOnlyList<string> LoadRoutingRules(AppSettings settings, string finalOutbound)
-    {
-        var customRules = _rulesStore.LoadRules();
-        if (customRules.Count > 0)
-        {
-            return customRules;
-        }
-
-        if (settings.UseSubscriptionPolicyGroups)
-        {
-            var subscriptionRules = _proxyCatalogStore.LoadRules();
-            if (subscriptionRules.Count > 0)
-            {
-                return subscriptionRules;
-            }
-        }
-
-        return _defaultRulesService.GetDefaultRules(finalOutbound);
     }
 
     private static bool TryBuildOutbound(
@@ -487,7 +530,8 @@ public sealed class SingBoxConfigWriter
         };
     }
 
-    private static bool TryConvertClashRule(string rule, string finalOutbound, out Dictionary<string, object> converted)
+    private static bool TryConvertClashRule(string rule, string finalOutbound, out Dictionary<string, object> converted,
+        HashSet<string>? targets = null)
     {
         converted = new Dictionary<string, object>();
         if (string.IsNullOrWhiteSpace(rule))
@@ -507,14 +551,14 @@ public sealed class SingBoxConfigWriter
             return false;
         }
 
-        var policyIndex = kind == "GEOIP" || kind == "GEOSITE" ? 2 : 2;
+        const int policyIndex = 2;
         if (policyIndex >= parts.Length)
         {
             return false;
         }
 
         var value = parts[1].Trim();
-        var outbound = MapPolicy(parts[policyIndex], finalOutbound);
+        var outbound = MapPolicy(parts[policyIndex], finalOutbound, targets);
         if (string.IsNullOrWhiteSpace(value))
         {
             return false;
@@ -538,12 +582,6 @@ public sealed class SingBoxConfigWriter
             case "IP-CIDR":
             case "IP-CIDR6":
                 converted["ip_cidr"] = new[] { value };
-                return true;
-            case "GEOIP":
-                converted["geoip"] = new[] { value.ToLowerInvariant() };
-                return true;
-            case "GEOSITE":
-                converted["geosite"] = new[] { value.ToLowerInvariant() };
                 return true;
             default:
                 return false;
@@ -676,7 +714,7 @@ public sealed class SingBoxConfigWriter
             };
     }
 
-    private static string MapPolicy(string policy, string finalOutbound)
+    private static string MapPolicy(string policy, string finalOutbound, HashSet<string>? targets = null)
     {
         if (policy.Equals("DIRECT", StringComparison.OrdinalIgnoreCase))
         {
@@ -689,7 +727,7 @@ public sealed class SingBoxConfigWriter
             return "block";
         }
 
-        return finalOutbound;
+        return targets?.TryGetValue(policy, out var tag) == true ? tag : finalOutbound;
     }
 
     private static string UniqueTag(string name, HashSet<string> usedTags)

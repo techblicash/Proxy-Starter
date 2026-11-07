@@ -74,7 +74,7 @@ public sealed class LatencyTestService
         return await _apiClient.TestDelayAsync(proxyName, timeoutMs, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<double> TestProxyDownloadSpeedMbpsAsync(
+    public async Task<double> TestProxyDownloadSpeedMegabytesPerSecondAsync(
         string proxyName,
         int timeoutMs = 12000,
         long maxBytes = 5_000_000,
@@ -440,7 +440,7 @@ public sealed class LatencyTestService
                     continue;
                 }
 
-                return Math.Round(totalBytes * 8d / watch.Elapsed.TotalSeconds / 1_000_000d, 2);
+                return totalBytes / watch.Elapsed.TotalSeconds / 1_000_000d;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

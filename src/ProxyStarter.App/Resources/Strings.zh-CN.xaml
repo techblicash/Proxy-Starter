@@ -60,7 +60,7 @@
     <sys:String x:Key="Text_LatencyMs">延迟（ms）</sys:String>
 
     <sys:String x:Key="Text_RoutingMode">分流模式</sys:String>
-    <sys:String x:Key="Text_RulesHint">每行一条规则，例如：DOMAIN-SUFFIX,google.com,Auto</sys:String>
+    <sys:String x:Key="Text_RulesHint">规则模式下，自定义规则优先匹配，再使用默认的绕过大陆规则。每行一条，例如 DOMAIN-SUFFIX,example.com,DIRECT。MATCH 指定最终兜底。</sys:String>
     <sys:String x:Key="Text_SaveRules">保存规则</sys:String>
 
     <sys:String x:Key="Text_Clear">清空</sys:String>
@@ -133,4 +133,55 @@
     <sys:String x:Key="Text_EditFile">编辑文件</sys:String>
     <sys:String x:Key="Text_EditSubscriptionFile">编辑订阅文件</sys:String>
     <sys:String x:Key="Text_SubscriptionFileHint">编辑订阅原始内容，保存后将更新节点与策略组。</sys:String>
+
+    <sys:String x:Key="DialogOk">确定</sys:String>
+    <sys:String x:Key="DialogClose">关闭</sys:String>
+    <sys:String x:Key="DialogYes">是</sys:String>
+    <sys:String x:Key="DialogNo">否</sys:String>
+    <sys:String x:Key="DialogDetails">技术详情</sys:String>
+    <sys:String x:Key="Text_CustomRules">自定义规则</sys:String>
+    <sys:String x:Key="Text_RulesSaved">规则已保存</sys:String>
+    <sys:String x:Key="Text_RulesRestartHint">重启代理核心后，新规则会生效。</sys:String>
+    <sys:String x:Key="Error_CoreNotFound_Title">找不到代理核心</sys:String>
+    <sys:String x:Key="Error_CoreNotFound_Body">找不到核心可执行文件，请在设置中更新核心路径。</sys:String>
+    <sys:String x:Key="Error_CoreOperation_Title">代理核心操作失败</sys:String>
+    <sys:String x:Key="Error_CoreOperation_Body">无法启动或停止代理核心。</sys:String>
+    <sys:String x:Key="Error_NetworkSettings_Title">网络设置失败</sys:String>
+    <sys:String x:Key="Error_NetworkSettings_Body">无法应用网络设置。</sys:String>
+    <sys:String x:Key="Error_Elevation_Title">获取管理员权限失败</sys:String>
+    <sys:String x:Key="Error_Elevation_Body">无法以管理员身份重启应用，请手动以管理员身份运行。</sys:String>
+    <sys:String x:Key="Error_SubscriptionDownload_Title">下载订阅失败</sys:String>
+    <sys:String x:Key="Error_SubscriptionDownload_Body">无法下载订阅，请检查订阅地址和网络连接。</sys:String>
+    <sys:String x:Key="Error_NoSubscription_Title">未选择订阅</sys:String>
+    <sys:String x:Key="Error_NoSubscription_Body">请先选择一条订阅。</sys:String>
+    <sys:String x:Key="Error_NoSubscriptionCache_Title">订阅尚无缓存</sys:String>
+    <sys:String x:Key="Error_NoSubscriptionCache_Body">请先更新该订阅。</sys:String>
+    <sys:String x:Key="Error_SubscriptionSave_Title">保存订阅失败</sys:String>
+    <sys:String x:Key="Error_SubscriptionSave_Body">无法保存订阅文件。</sys:String>
+    <sys:String x:Key="Error_ModeSave_Title">保存路由模式失败</sys:String>
+    <sys:String x:Key="Error_ModeSave_Body">无法保存路由模式。</sys:String>
+    <sys:String x:Key="Error_ModeUpdate_Title">切换路由模式失败</sys:String>
+    <sys:String x:Key="Error_ModeUpdate_Body">无法切换路由模式，请检查核心是否正在运行。</sys:String>
+    <sys:String x:Key="Error_RulesSave_Title">保存自定义规则失败</sys:String>
+    <sys:String x:Key="Error_RulesSave_Body">无法保存自定义规则。</sys:String>
+    <sys:String x:Key="Error_NodeSelection_Title">切换节点失败</sys:String>
+    <sys:String x:Key="Error_NodeSelection_Body">无法切换节点或策略组，请检查核心是否正在运行，以及目标是否可用。</sys:String>
+    <sys:String x:Key="Error_QosApply_Title">应用限速失败</sys:String>
+    <sys:String x:Key="Error_QosApply_Body">无法应用限速设置。</sys:String>
+    <sys:String x:Key="Error_RestartRequired_Title">需要重启应用</sys:String>
+    <sys:String x:Key="Error_RestartRequired_Body">设置已保存，请以管理员身份重启应用以应用 TUN 设置。</sys:String>
+    <sys:String x:Key="Error_SettingsSave_Title">保存设置失败</sys:String>
+    <sys:String x:Key="Error_SettingsSave_Body">无法保存或应用设置。</sys:String>
+    <sys:String x:Key="Error_UpdateFeedMissing_Title">未设置更新源</sys:String>
+    <sys:String x:Key="Error_UpdateFeedMissing_Body">请在设置中填写更新源地址。</sys:String>
+    <sys:String x:Key="Error_UpdateUnavailable_Title">软件更新不可用</sys:String>
+    <sys:String x:Key="Error_UpdateUnavailable_Body">请使用 Windows 安装程序安装应用，以使用内置更新功能。</sys:String>
+    <sys:String x:Key="Error_UpdateCheck_Title">软件更新失败</sys:String>
+    <sys:String x:Key="Error_UpdateCheck_Body">无法检查或应用软件更新。</sys:String>
+    <sys:String x:Key="Error_CoreDownload_Title">下载核心失败</sys:String>
+    <sys:String x:Key="Error_CoreDownload_Body">无法下载或安装代理核心。</sys:String>
+    <sys:String x:Key="Text_LocateActiveNode">定位当前节点</sys:String>
+    <sys:String x:Key="Text_NodeSearchPlaceholder">搜索节点名称或地址</sys:String>
+    <sys:String x:Key="Text_FindNode">查找下一个</sys:String>
+    <sys:String x:Key="Text_NoMatchingNodes">没有匹配的节点</sys:String>
 </ResourceDictionary>

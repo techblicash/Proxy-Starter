@@ -1,4 +1,4 @@
-﻿<Page x:Class="ProxyStarter.App.Views.SettingsPage"
+<Page x:Class="ProxyStarter.App.Views.SettingsPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -363,21 +363,6 @@
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel>
-                                                <TextBlock Text="使用订阅策略组" Style="{StaticResource SettingsItemTitleStyle}" />
-                                                <TextBlock Text="关闭后节点页仅显示节点，并使用规则页自定义规则（为空时使用默认规则）"
-                                                           Style="{StaticResource SettingsItemHintStyle}" />
-                                            </StackPanel>
-                                            <CheckBox Grid.Column="1"
-                                                      IsChecked="{Binding UseSubscriptionPolicyGroups}"
-                                                      VerticalAlignment="Center" />
-                                        </Grid>
-
-                                        <Grid Style="{StaticResource SettingsRowStyle}">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel>
                                                 <TextBlock Text="{DynamicResource Text_LogLevel}" Style="{StaticResource SettingsItemTitleStyle}" />
                                                 <TextBlock Text="{DynamicResource Text_LogLevelHint}" Style="{StaticResource SettingsItemHintStyle}" />
                                             </StackPanel>
@@ -400,7 +385,7 @@
                                             <TextBox Grid.Column="1" Width="180" Text="{Binding LogRetentionCount}" />
                                         </Grid>
 
-                                        <Grid Margin="0">
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />

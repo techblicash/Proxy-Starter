@@ -58,7 +58,7 @@ public sealed class LocalizationService
 
         var dictionary = new ResourceDictionary
         {
-            Source = new Uri($"Resources/Strings.{culture}.xaml", UriKind.Relative)
+            Source = new Uri($"/ProxyStarter.App;component/Resources/Strings.{culture}.xaml", UriKind.Relative)
         };
 
         var merged = resources.MergedDictionaries;

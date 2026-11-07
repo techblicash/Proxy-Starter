@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.Linq;
 using System.Collections.Generic;
 using System.Collections.Specialized;
@@ -50,6 +50,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
         _settingsStore = settingsStore;
         _dialogService = dialogService;
         Profiles = new ObservableCollection<SubscriptionProfile>(_subscriptionStore.Load());
+        _selectedProfile = Profiles.FirstOrDefault(profile => profile.Id == _subscriptionStore.SelectedProfileId);
         Profiles.CollectionChanged += OnProfilesCollectionChanged;
         foreach (var profile in Profiles)
         {
@@ -62,6 +63,11 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
         };
         _activeTimer.Tick += async (_, _) => await UpdateActiveProfileAsync();
         // Timer runs only while the Profiles page is visible.
+    }
+
+    partial void OnSelectedProfileChanged(SubscriptionProfile? value)
+    {
+        _subscriptionStore.SelectedProfileId = value?.Id;
     }
 
     [RelayCommand]
@@ -103,7 +109,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
                 message += $"\n\nInner: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}";
             }
 
-            await _dialogService.ShowErrorAsync("Subscription Download Failed", message);
+            await _dialogService.ShowErrorAsync(DialogError.SubscriptionDownload, message);
         }
     }
 
@@ -114,7 +120,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
         {
             try
             {
-                await _dialogService.ShowErrorAsync("No Selection", "Please select a subscription first.");
+                await _dialogService.ShowErrorAsync(DialogError.NoSubscription);
             }
             catch
             {
@@ -142,7 +148,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
 
             try
             {
-                await _dialogService.ShowErrorAsync("Subscription Download Failed", message);
+                await _dialogService.ShowErrorAsync(DialogError.SubscriptionDownload, message);
             }
             catch
             {
@@ -200,7 +206,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
         {
             try
             {
-                await _dialogService.ShowErrorAsync("No Cache", "Please update the subscription first.");
+                await _dialogService.ShowErrorAsync(DialogError.NoSubscriptionCache);
             }
             catch
             {
@@ -241,7 +247,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
 
             try
             {
-                await _dialogService.ShowErrorAsync("Save Failed", message);
+                await _dialogService.ShowErrorAsync(DialogError.SubscriptionSave, message);
             }
             catch
             {
@@ -279,7 +285,9 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
             return;
         }
 
-        Profiles.Remove(SelectedProfile);
+        var profile = SelectedProfile;
+        SelectedProfile = null;
+        Profiles.Remove(profile);
         PersistProfiles(rebuildCatalog: true);
         await UpdateActiveProfileAsync();
     }
@@ -352,6 +360,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
 
     private void ReplaceProfiles(IEnumerable<SubscriptionProfile> profiles)
     {
+        var selectedId = SelectedProfile?.Id;
         _suppressProfilePersistence = true;
         try
         {
@@ -365,6 +374,8 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
             {
                 Profiles.Add(profile);
             }
+
+            SelectedProfile = Profiles.FirstOrDefault(profile => profile.Id == selectedId);
         }
         finally
         {
@@ -380,7 +391,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
         }
 
         var settings = _settingsStore.Settings;
-        var groupName = RoutingDefaults.ResolveSelectionGroup(settings.SelectionGroup, settings.UseSubscriptionPolicyGroups);
+        var groupName = _proxyCatalogStore.ResolveSelectionGroup(settings);
         string? activeNode = null;
         try
         {

@@ -1,4 +1,4 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace ProxyStarter.App.Models;
 
@@ -29,6 +29,9 @@ public sealed partial class ProxyNode : ObservableObject
 
     [ObservableProperty]
     private bool _isActive;
+
+    [ObservableProperty]
+    private bool _isLocated;
 
     partial void OnTypeChanged(string value)
     {

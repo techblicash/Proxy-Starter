@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Text.Json;
 using ProxyStarter.App.Models;
@@ -82,7 +82,7 @@ public sealed class AppSettingsStore
         settings.Mode = NormalizeChoice(settings.Mode, "rule", "rule", "global", "direct");
         settings.LogLevel = NormalizeChoice(settings.LogLevel, "info", "debug", "info", "warning", "error", "silent");
         settings.LogRetentionCount = Math.Clamp(settings.LogRetentionCount, 1, MihomoLogService.MaxRetentionLimit);
-        settings.SelectionGroup = DefaultIfBlank(settings.SelectionGroup, "Auto");
+        settings.SelectionGroup = settings.SelectionGroup?.Trim() ?? string.Empty;
         settings.Theme = NormalizeChoice(settings.Theme, "Light", "Light", "Dark", "System");
         settings.PaneAcrylicOpacity = Math.Clamp(settings.PaneAcrylicOpacity, 0, 255);
         settings.ContentAcrylicOpacity = Math.Clamp(settings.ContentAcrylicOpacity, 0, 255);

@@ -37,13 +37,6 @@ public sealed class RulesStore
 
     public void SaveText(string? text)
     {
-        try
-        {
-            AtomicFile.WriteAllText(_rulesPath, text ?? string.Empty, new UTF8Encoding(false));
-        }
-        catch (Exception ex)
-        {
-            CrashLogger.Log(ex, "RulesStore: Save rules");
-        }
+        AtomicFile.WriteAllText(_rulesPath, text ?? string.Empty, new UTF8Encoding(false));
     }
 }

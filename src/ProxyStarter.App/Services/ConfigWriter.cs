@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -29,30 +29,39 @@ public sealed class ConfigWriter
     public string EnsureConfig(AppSettings settings)
     {
         var configPath = ResolvePath(settings.ConfigPath, AppPaths.DataDirectory);
-        var content = BuildConfig(settings);
+        GeoIpDatabaseHelper.EnsureDatabase(configPath);
+        var content = BuildConfig(settings, configPath);
 
         AtomicFile.WriteAllText(configPath, content, new UTF8Encoding(false));
         return configPath;
     }
 
-    private string BuildConfig(AppSettings settings)
+    private string BuildConfig(AppSettings settings, string configPath)
     {
         var proxies = _proxyCatalogStore.LoadProxyDefinitions();
-        var proxyNames = new List<string>();
-        foreach (var proxy in proxies)
+        var importedGroups = _proxyCatalogStore.LoadProxyGroups();
+        var groups = importedGroups.Select(group => new Dictionary<string, object>(group)).ToList();
+        foreach (var group in groups)
         {
-            if (proxy.TryGetValue("name", out var nameValue) && nameValue is not null)
-            {
-                proxyNames.Add(nameValue.ToString() ?? string.Empty);
-            }
+            group.Remove(RoutingDefaults.GroupSourceKey);
         }
 
-        var useSubscriptionPolicyGroups = settings.UseSubscriptionPolicyGroups;
-        var selectionGroup = RoutingDefaults.ResolveSelectionGroup(settings.SelectionGroup, useSubscriptionPolicyGroups);
-        var groups = BuildProxyGroups(selectionGroup, proxyNames, useSubscriptionPolicyGroups);
-        var ruleProviders = useSubscriptionPolicyGroups
-            ? _proxyCatalogStore.LoadRuleProviders()
-            : new Dictionary<string, object>(System.StringComparer.OrdinalIgnoreCase);
+        var nodes = _proxyCatalogStore.LoadNodes();
+        var flatNodes = RoutingDefaults.GetFlatNodes(nodes, importedGroups);
+        var flatGroup = RoutingDefaults.GetFlatGroupName(nodes, importedGroups);
+        if (flatNodes.Count > 0)
+        {
+            groups.Add(new Dictionary<string, object>
+            {
+                ["name"] = flatGroup,
+                ["type"] = "select",
+                ["hidden"] = true,
+                ["proxies"] = flatNodes.Select(node => node.Name).Distinct().Concat(new[] { "DIRECT", "REJECT" }).ToList()
+            });
+        }
+
+        var selectionGroup = RoutingDefaults.GetDefaultGroupName(importedGroups, flatNodes.Count > 0, flatGroup);
+        var ruleProviders = _proxyCatalogStore.LoadRuleProviders();
 
         var config = new Dictionary<string, object>
         {
@@ -80,10 +89,10 @@ public sealed class ConfigWriter
                 ["strict-route"] = true,
                 ["dns-hijack"] = new[] { "any:53" }
             },
-            ["dns"] = MihomoDnsConfig.Build(),
+            ["dns"] = MihomoDnsConfig.Build(geoIpFiltering: GeoIpDatabaseHelper.HasDatabase(configPath)),
             ["proxies"] = proxies,
             ["proxy-groups"] = groups,
-            ["rules"] = BuildRules(settings, selectionGroup, useSubscriptionPolicyGroups)
+            ["rules"] = BuildRules(settings, selectionGroup, proxies, groups)
         };
 
         if (ruleProviders.Count > 0)
@@ -99,212 +108,19 @@ public sealed class ConfigWriter
         return _serializer.Serialize(config);
     }
 
-    private List<Dictionary<string, object>> BuildProxyGroups(
-        string selectionGroup,
-        List<string> proxyNames,
-        bool useSubscriptionPolicyGroups)
+    private List<string> BuildRules(
+        AppSettings settings, string fallback,
+        IReadOnlyList<Dictionary<string, object>> proxies, IReadOnlyList<Dictionary<string, object>> groups)
     {
-        var groups = new List<Dictionary<string, object>>();
-        var seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+        var targets = proxies.Concat(groups).Select(RoutingDefaults.GroupName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        targets.UnionWith(new[] { "DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL" });
+        string MapTarget(string target) => targets.TryGetValue(target, out var existing) ? existing : fallback;
 
-        if (useSubscriptionPolicyGroups)
-        {
-            foreach (var group in _proxyCatalogStore.LoadProxyGroups())
-            {
-                var sanitized = SanitizeGroup(group, proxyNames);
-                if (sanitized is null)
-                {
-                    continue;
-                }
-
-                var name = sanitized.TryGetValue("name", out var nameValue) ? nameValue?.ToString() ?? string.Empty : string.Empty;
-                if (string.IsNullOrWhiteSpace(name) || !seen.Add(name))
-                {
-                    continue;
-                }
-
-                groups.Add(sanitized);
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(selectionGroup) && !seen.Contains(selectionGroup))
-        {
-            groups.Insert(0, new Dictionary<string, object>
-            {
-                ["name"] = selectionGroup,
-                ["type"] = "select",
-                ["proxies"] = BuildGroupList(proxyNames)
-            });
-        }
-
-        return groups;
-    }
-
-    private static Dictionary<string, object>? SanitizeGroup(Dictionary<string, object> group, List<string> proxyNames)
-    {
-        if (!group.TryGetValue("name", out var nameValue))
-        {
-            return null;
-        }
-
-        var name = nameValue?.ToString() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return null;
-        }
-
-        var result = new Dictionary<string, object>(group, System.StringComparer.OrdinalIgnoreCase);
-
-        if (!result.TryGetValue("type", out var typeValue) || string.IsNullOrWhiteSpace(typeValue?.ToString()))
-        {
-            result["type"] = "select";
-        }
-
-        result.Remove("use");
-
-        if (!result.TryGetValue("proxies", out var proxiesValue) || proxiesValue is null)
-        {
-            result["proxies"] = BuildGroupList(proxyNames);
-            return result;
-        }
-
-        var list = new List<string>();
-        switch (proxiesValue)
-        {
-            case IEnumerable<string> strings:
-                foreach (var text in strings)
-                {
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        list.Add(text);
-                    }
-                }
-                break;
-            case IEnumerable<object> objects:
-                foreach (var item in objects)
-                {
-                    var text = item?.ToString();
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        list.Add(text);
-                    }
-                }
-                break;
-            default:
-                var single = proxiesValue.ToString();
-                if (!string.IsNullOrWhiteSpace(single))
-                {
-                    list.Add(single);
-                }
-                break;
-        }
-
-        if (list.Count == 0)
-        {
-            result["proxies"] = BuildGroupList(proxyNames);
-        }
-        else
-        {
-            result["proxies"] = list;
-        }
-
-        return result;
-    }
-
-    private static List<string> BuildGroupList(List<string> proxies)
-    {
-        var list = new List<string>
-        {
-            "DIRECT",
-            "REJECT"
-        };
-
-        foreach (var proxy in proxies.Distinct())
-        {
-            if (!string.IsNullOrWhiteSpace(proxy))
-            {
-                list.Add(proxy);
-            }
-        }
-
-        return list;
-    }
-
-    private List<string> BuildRules(AppSettings settings, string selectionGroup, bool useSubscriptionPolicyGroups)
-    {
-        var rules = _rulesStore.LoadRules().ToList();
-        if (rules.Count == 0)
-        {
-            rules = useSubscriptionPolicyGroups
-                ? _proxyCatalogStore.LoadRules().ToList()
-                : _defaultRulesService.GetDefaultRules(selectionGroup).ToList();
-        }
-
-        var blockedRules = BuildBlockedRules(settings.BlockedSites);
-        if (blockedRules.Count > 0)
-        {
-            rules.InsertRange(0, blockedRules);
-        }
-
-        if (!useSubscriptionPolicyGroups)
-        {
-            rules = NormalizeRulesForFlatMode(rules, selectionGroup);
-        }
-
-        if (rules.Count == 0)
-        {
-            return new List<string> { $"MATCH,{selectionGroup}" };
-        }
-
-        var hasMatch = rules.Any(rule => rule.StartsWith("MATCH,", System.StringComparison.OrdinalIgnoreCase));
-        if (!hasMatch)
-        {
-            rules.Add($"MATCH,{selectionGroup}");
-        }
-
-        return rules;
-    }
-
-    private static List<string> NormalizeRulesForFlatMode(List<string> rules, string selectionGroup)
-    {
-        var normalized = new List<string>(rules.Count);
-        foreach (var raw in rules)
-        {
-            if (string.IsNullOrWhiteSpace(raw))
-            {
-                continue;
-            }
-
-            var parts = raw.Split(',');
-            if (parts.Length < 2)
-            {
-                normalized.Add(raw);
-                continue;
-            }
-
-            var head = parts[0].Trim();
-            var policyIndex = head.Equals("MATCH", System.StringComparison.OrdinalIgnoreCase) ? 1 : 2;
-            if (policyIndex >= parts.Length)
-            {
-                normalized.Add(raw);
-                continue;
-            }
-
-            var policy = parts[policyIndex].Trim();
-            var keepPolicy =
-                policy.Equals("DIRECT", System.StringComparison.OrdinalIgnoreCase)
-                || policy.Equals("REJECT", System.StringComparison.OrdinalIgnoreCase)
-                || policy.Equals(selectionGroup, System.StringComparison.Ordinal);
-
-            if (!keepPolicy)
-            {
-                parts[policyIndex] = selectionGroup;
-            }
-
-            normalized.Add(string.Join(",", parts));
-        }
-
-        return normalized;
+        return BuildBlockedRules(settings.BlockedSites)
+            .Concat(RoutingDefaults.ComposeRules(
+                _rulesStore.LoadRules(), _defaultRulesService.Rules, _proxyCatalogStore.LoadRules(), fallback)
+                .Select(rule => RoutingDefaults.RewriteRule(rule, MapTarget)))
+            .ToList();
     }
 
     private static List<string> BuildBlockedRules(string? blockedSites)

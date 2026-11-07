@@ -16,7 +16,8 @@ internal static class MihomoDnsConfig
         "8.8.8.8"
     };
 
-    public static Dictionary<string, object> Build(int listenPort = 1053, string listenHost = "0.0.0.0")
+    public static Dictionary<string, object> Build(
+        int listenPort = 1053, string listenHost = "0.0.0.0", bool? geoIpFiltering = null)
     {
         var nameservers = GetNameservers();
         return new Dictionary<string, object>
@@ -30,7 +31,7 @@ internal static class MihomoDnsConfig
             ["fallback"] = FallbackNameservers,
             ["fallback-filter"] = new Dictionary<string, object>
             {
-                ["geoip"] = true,
+                ["geoip"] = geoIpFiltering ?? GeoIpDatabaseHelper.HasDatabase(),
                 ["geoip-code"] = "CN",
                 ["ipcidr"] = new[] { "240.0.0.0/4" }
             }

@@ -1,4 +1,4 @@
-﻿namespace ProxyStarter.App.Models;
+namespace ProxyStarter.App.Models;
 
 public sealed class AppSettings
 {
@@ -15,8 +15,7 @@ public sealed class AppSettings
     public string Mode { get; set; } = "rule";
     public string LogLevel { get; set; } = "info";
     public int LogRetentionCount { get; set; } = 50;
-    public string SelectionGroup { get; set; } = "Auto";
-    public bool UseSubscriptionPolicyGroups { get; set; } = true;
+    public string SelectionGroup { get; set; } = string.Empty;
     public bool AutoStart { get; set; } = false;
     public string UpdateFeedUrl { get; set; } = global::ProxyStarter.App.Services.SoftwareUpdateDefaults.FeedUrl;
     public string Theme { get; set; } = "Light";

@@ -32,6 +32,11 @@
                     <Setter Property="Background" Value="{DynamicResource AccentFillColorSecondaryBrush}" />
                     <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
                 </DataTrigger>
+                <DataTrigger Binding="{Binding IsLocated}" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                    <Setter Property="BorderThickness" Value="2" />
+                    <Setter Property="Padding" Value="11" />
+                </DataTrigger>
             </Style.Triggers>
         </Style>
 
@@ -150,6 +155,7 @@
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
@@ -161,7 +167,7 @@
 
                     <WrapPanel Orientation="Horizontal" Margin="0,0,12,0">
                         <ui:Button Content="{DynamicResource Text_Refresh}" Command="{Binding RefreshNodesCommand}" Margin="0,0,8,8" />
-                        <ui:Button Content="定位当前节点" Click="OnLocateActiveNodeClick" Margin="0,0,8,8" />
+                        <ui:Button Content="{DynamicResource Text_LocateActiveNode}" Click="OnLocateActiveNodeClick" Margin="0,0,8,8" />
                         <ui:Button Content="{DynamicResource Text_TcpTest}" Command="{Binding TcpTestCommand}" Margin="0,0,8,8" />
                         <ui:Button Content="{DynamicResource Text_ConnectTest}" Command="{Binding ConnectTestCommand}" Margin="0,0,8,8" />
                         <ui:Button Content="{DynamicResource Text_SpeedTest}" Command="{Binding SpeedTestCommand}" Margin="0,0,8,8" />
@@ -194,8 +200,22 @@
                     </StackPanel>
                 </Grid>
 
+                <WrapPanel Grid.Row="1" Margin="0,0,0,12">
+                    <ui:TextBox x:Name="NodeSearchBox"
+                                Width="230"
+                                Margin="0,0,8,0"
+                                PlaceholderText="{DynamicResource Text_NodeSearchPlaceholder}"
+                                AutomationProperties.Name="{DynamicResource Text_NodeSearchPlaceholder}"
+                                TextChanged="OnNodeSearchTextChanged"
+                                KeyDown="OnNodeSearchKeyDown" />
+                    <ui:Button Content="{DynamicResource Text_FindNode}"
+                               Click="OnFindNodeClick"
+                               Margin="0,0,12,0" />
+                    <TextBlock x:Name="NodeSearchStatus" Opacity="0.7" VerticalAlignment="Center" />
+                </WrapPanel>
+
                 <Border x:Name="NodesListHost"
-                        Grid.Row="1"
+                        Grid.Row="2"
                         Background="{DynamicResource LayerOnAcrylicFillColorDefaultBrush}"
                         BorderBrush="{DynamicResource SurfaceStrokeColorDefaultBrush}"
                         BorderThickness="1"

@@ -1,4 +1,4 @@
-﻿using System.Threading.Tasks;
+using System.Threading.Tasks;
 using System;
 using System.Windows;
 using ProxyStarter.App.Models;
@@ -8,10 +8,33 @@ using WpfMessageBox = Wpf.Ui.Controls.MessageBox;
 
 namespace ProxyStarter.App.Services;
 
+public enum DialogError
+{
+    CoreNotFound,
+    CoreOperation,
+    NetworkSettings,
+    Elevation,
+    SubscriptionDownload,
+    NoSubscription,
+    NoSubscriptionCache,
+    SubscriptionSave,
+    ModeSave,
+    ModeUpdate,
+    RulesSave,
+    NodeSelection,
+    QosApply,
+    RestartRequired,
+    SettingsSave,
+    UpdateFeedMissing,
+    UpdateUnavailable,
+    UpdateCheck,
+    CoreDownload,
+}
+
 public interface IDialogService
 {
     Task ShowInfoAsync(string title, string message);
-    Task ShowErrorAsync(string title, string message);
+    Task ShowErrorAsync(DialogError error, string? details = null);
     Task<bool> ShowConfirmAsync(string title, string message);
     SubscriptionProfile? ShowAddSubscriptionDialog();
     SubscriptionProfile? ShowEditSubscriptionDialog(SubscriptionProfile existing);
@@ -20,19 +43,35 @@ public interface IDialogService
 
 public sealed class DialogService : IDialogService
 {
-    public async Task ShowInfoAsync(string title, string message)
+    private readonly LocalizationService _localization;
+
+    public DialogService(LocalizationService localization)
     {
-        await ShowMessageAsync(title, message, "OK");
+        _localization = localization;
     }
 
-    public async Task ShowErrorAsync(string title, string message)
+    public async Task ShowInfoAsync(string title, string message)
     {
-        await ShowMessageAsync(title, message, "Close");
+        await ShowMessageAsync(title, message, _localization.GetString("DialogOk", "OK"));
+    }
+
+    public async Task ShowErrorAsync(DialogError error, string? details = null)
+    {
+        var title = _localization.GetString($"Error_{error}_Title", "Error");
+        var message = _localization.GetString($"Error_{error}_Body", string.Empty);
+        if (!string.IsNullOrWhiteSpace(details))
+        {
+            var label = _localization.GetString("DialogDetails", "Technical details");
+            message += $"\n\n{label}\n{details}";
+        }
+
+        await ShowMessageAsync(title, message, _localization.GetString("DialogClose", "Close"));
     }
 
     public async Task<bool> ShowConfirmAsync(string title, string message)
     {
-        var dialog = BuildMessageBox(title, message, "Yes", "No");
+        var dialog = BuildMessageBox(title, message,
+            _localization.GetString("DialogYes", "Yes"), _localization.GetString("DialogNo", "No"));
         var result = await dialog.ShowDialogAsync(true);
         return result == Wpf.Ui.Controls.MessageBoxResult.Primary;
     }
@@ -133,7 +172,17 @@ public sealed class DialogService : IDialogService
         var dialog = new WpfMessageBox
         {
             Title = title,
-            Content = message,
+            Content = new System.Windows.Controls.ScrollViewer
+            {
+                MaxHeight = 360,
+                VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
+                Content = new System.Windows.Controls.TextBlock
+                {
+                    Text = message,
+                    TextWrapping = TextWrapping.Wrap,
+                    MaxWidth = 560
+                }
+            },
             PrimaryButtonText = primaryText,
             SecondaryButtonText = secondaryText ?? string.Empty,
             CloseButtonText = string.Empty,
