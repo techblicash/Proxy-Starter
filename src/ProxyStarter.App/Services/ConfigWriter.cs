@@ -14,62 +14,48 @@ public sealed class ConfigWriter
     private readonly RulesStore _rulesStore;
     private readonly DefaultRulesService _defaultRulesService;
     private readonly ISerializer _serializer;
+    private readonly SubscriptionService _subscriptionService;
 
     public ConfigWriter(
         ProxyCatalogStore proxyCatalogStore,
         RulesStore rulesStore,
-        DefaultRulesService defaultRulesService)
+        DefaultRulesService defaultRulesService,
+        SubscriptionService subscriptionService)
     {
         _proxyCatalogStore = proxyCatalogStore;
         _rulesStore = rulesStore;
         _defaultRulesService = defaultRulesService;
+        _subscriptionService = subscriptionService;
         _serializer = new SerializerBuilder().Build();
     }
 
-    public string EnsureConfig(AppSettings settings)
+    public (string Path, string? NodeName) EnsureConfig(AppSettings settings, bool requireSelectedNode = false)
     {
         var configPath = ResolvePath(settings.ConfigPath, AppPaths.DataDirectory);
         GeoIpDatabaseHelper.EnsureDatabase(configPath);
-        var content = BuildConfig(settings, configPath);
+        var (nodes, proxies) = _proxyCatalogStore.LoadOutbounds();
+        var names = proxies.Select(RoutingDefaults.OutboundName).ToHashSet(StringComparer.Ordinal);
+        var activeNode = RoutingDefaults.ResolveSelectedNode(settings, nodes, names, requireSelectedNode);
+        var content = BuildConfig(settings, configPath, proxies, activeNode ?? "DIRECT");
 
         AtomicFile.WriteAllText(configPath, content, new UTF8Encoding(false));
-        return configPath;
+        return (configPath, activeNode);
     }
 
-    private string BuildConfig(AppSettings settings, string configPath)
+    private string BuildConfig(
+        AppSettings settings, string configPath, IReadOnlyList<Dictionary<string, object>> proxies, string selectedNode)
     {
-        var proxies = _proxyCatalogStore.LoadProxyDefinitions();
-        var importedGroups = _proxyCatalogStore.LoadProxyGroups();
-        var groups = importedGroups.Select(group => new Dictionary<string, object>(group)).ToList();
-        foreach (var group in groups)
-        {
-            group.Remove(RoutingDefaults.GroupSourceKey);
-        }
-
-        var nodes = _proxyCatalogStore.LoadNodes();
-        var flatNodes = RoutingDefaults.GetFlatNodes(nodes, importedGroups);
-        var flatGroup = RoutingDefaults.GetFlatGroupName(nodes, importedGroups);
-        if (flatNodes.Count > 0)
-        {
-            groups.Add(new Dictionary<string, object>
-            {
-                ["name"] = flatGroup,
-                ["type"] = "select",
-                ["hidden"] = true,
-                ["proxies"] = flatNodes.Select(node => node.Name).Distinct().Concat(new[] { "DIRECT", "REJECT" }).ToList()
-            });
-        }
-
-        var selectionGroup = RoutingDefaults.GetDefaultGroupName(importedGroups, flatNodes.Count > 0, flatGroup);
-        var ruleProviders = _proxyCatalogStore.LoadRuleProviders();
-
+        var (subscriptionRules, ruleProviders) = settings.Mode == "rule"
+            ? _subscriptionService.LoadRoutingRules(settings.SubscriptionRulesProfileId)
+            : (Array.Empty<string>(), new Dictionary<string, object>());
         var config = new Dictionary<string, object>
         {
             ["mixed-port"] = settings.MixedPort,
             ["port"] = settings.HttpPort,
             ["socks-port"] = settings.SocksPort,
             ["allow-lan"] = settings.AllowLan,
-            ["mode"] = settings.Mode,
+            // Global routing is expressed with a single rule targeting the selected node.
+            ["mode"] = "rule",
             ["log-level"] = settings.LogLevel,
             ["ipv6"] = false,
             ["external-controller"] = $"127.0.0.1:{settings.ApiPort}",
@@ -77,7 +63,6 @@ public sealed class ConfigWriter
             ["tcp-concurrent"] = true,
             ["profile"] = new Dictionary<string, object>
             {
-                ["store-selected"] = true,
                 ["store-fake-ip"] = true
             },
             ["tun"] = new Dictionary<string, object>
@@ -91,12 +76,25 @@ public sealed class ConfigWriter
             },
             ["dns"] = MihomoDnsConfig.Build(geoIpFiltering: GeoIpDatabaseHelper.HasDatabase(configPath)),
             ["proxies"] = proxies,
-            ["proxy-groups"] = groups,
-            ["rules"] = BuildRules(settings, selectionGroup, proxies, groups)
+            ["rules"] = BuildRules(settings, selectedNode, subscriptionRules, ruleProviders)
         };
 
         if (ruleProviders.Count > 0)
         {
+            foreach (var provider in ruleProviders.Values.OfType<Dictionary<string, object>>())
+            {
+                if (provider.TryGetValue("proxy", out var policy) && policy is string target)
+                {
+                    provider["proxy"] = RoutingDefaults.MapMihomoTarget(target, selectedNode);
+                }
+
+                if (string.Equals(provider.GetValueOrDefault("type")?.ToString(), "http", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Let the core cache HTTP providers by URL when switching between subscriptions.
+                    provider.Remove("path");
+                }
+            }
+
             config["rule-providers"] = ruleProviders;
         }
 
@@ -108,19 +106,32 @@ public sealed class ConfigWriter
         return _serializer.Serialize(config);
     }
 
-    private List<string> BuildRules(
-        AppSettings settings, string fallback,
-        IReadOnlyList<Dictionary<string, object>> proxies, IReadOnlyList<Dictionary<string, object>> groups)
+    private IReadOnlyList<string> BuildRules(
+        AppSettings settings, string selectedNode, IReadOnlyList<string> subscriptionRules,
+        IReadOnlyDictionary<string, object> ruleProviders)
     {
-        var targets = proxies.Concat(groups).Select(RoutingDefaults.GroupName).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        targets.UnionWith(new[] { "DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL" });
-        string MapTarget(string target) => targets.TryGetValue(target, out var existing) ? existing : fallback;
+        if (settings.Mode == "direct")
+        {
+            return new[] { "MATCH,DIRECT" };
+        }
+
+        if (settings.Mode == "global")
+        {
+            return new[] { $"MATCH,{selectedNode}" };
+        }
 
         return BuildBlockedRules(settings.BlockedSites)
-            .Concat(RoutingDefaults.ComposeRules(
-                _rulesStore.LoadRules(), _defaultRulesService.Rules, _proxyCatalogStore.LoadRules(), fallback)
-                .Select(rule => RoutingDefaults.RewriteRule(rule, MapTarget)))
+            .Concat(RoutingDefaults.ComposeRules(_rulesStore.LoadRules(), _defaultRulesService.Rules, subscriptionRules, selectedNode))
+            .Where(rule => HasRuleProvider(rule, ruleProviders))
+            .Select(rule => RoutingDefaults.RewriteRule(rule, target => RoutingDefaults.MapMihomoTarget(target, selectedNode)))
             .ToList();
+    }
+
+    private static bool HasRuleProvider(string rule, IReadOnlyDictionary<string, object> ruleProviders)
+    {
+        var fields = rule.Split(',', 3);
+        return !fields[0].Trim().Equals("RULE-SET", StringComparison.OrdinalIgnoreCase)
+            || (fields.Length == 3 && ruleProviders.ContainsKey(fields[1].Trim()));
     }
 
     private static List<string> BuildBlockedRules(string? blockedSites)

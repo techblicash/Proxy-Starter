@@ -66,6 +66,12 @@ public partial class SettingsViewModel : ObservableObject
     private bool _autoStart;
 
     [ObservableProperty]
+    private bool _autoStartCore;
+
+    [ObservableProperty]
+    private bool _hideToTrayOnWindowsStartup;
+
+    [ObservableProperty]
     private string _updateFeedUrl;
 
     [ObservableProperty]
@@ -239,6 +245,8 @@ public partial class SettingsViewModel : ObservableObject
             settings.LogLevel = LogLevel;
             settings.LogRetentionCount = Math.Clamp(LogRetentionCount, 1, MihomoLogService.MaxRetentionLimit);
             settings.AutoStart = AutoStart;
+            settings.AutoStartCore = AutoStartCore;
+            settings.HideToTrayOnWindowsStartup = HideToTrayOnWindowsStartup;
             settings.UpdateFeedUrl = UpdateFeedUrl ?? string.Empty;
             settings.Theme = Theme;
             settings.PaneAcrylicOpacity = Math.Clamp(PaneAcrylicOpacity, 0, 255);
@@ -316,6 +324,8 @@ public partial class SettingsViewModel : ObservableObject
             LogLevel = settings.LogLevel;
             LogRetentionCount = settings.LogRetentionCount;
             AutoStart = _autoStartService.IsEnabled();
+            AutoStartCore = settings.AutoStartCore;
+            HideToTrayOnWindowsStartup = settings.HideToTrayOnWindowsStartup;
             UpdateFeedUrl = settings.UpdateFeedUrl ?? string.Empty;
             CurrentVersion = _softwareUpdateService.CurrentVersion;
             SoftwareUpdateStatus = $"Current version: {CurrentVersion}";

@@ -25,27 +25,31 @@ public sealed class SingBoxConfigWriter
     private readonly ProxyCatalogStore _proxyCatalogStore;
     private readonly RulesStore _rulesStore;
     private readonly DefaultRulesService _defaultRulesService;
+    private readonly SubscriptionService _subscriptionService;
 
     public SingBoxConfigWriter(
         ProxyCatalogStore proxyCatalogStore,
         RulesStore rulesStore,
-        DefaultRulesService defaultRulesService)
+        DefaultRulesService defaultRulesService,
+        SubscriptionService subscriptionService)
     {
         _proxyCatalogStore = proxyCatalogStore;
         _rulesStore = rulesStore;
         _defaultRulesService = defaultRulesService;
+        _subscriptionService = subscriptionService;
     }
 
-    public string EnsureConfig(AppSettings settings)
+    public (string Path, string? NodeName) EnsureConfig(AppSettings settings, bool requireSelectedNode = false)
     {
         var configPath = ProxyCorePath.ResolveDataPath(settings.ConfigPath);
-        var config = BuildConfig(settings);
+        var config = BuildConfig(settings, requireSelectedNode, out var activeNode);
         var json = JsonSerializer.Serialize(config, JsonOptions);
         AtomicFile.WriteAllText(configPath, json, new UTF8Encoding(false));
-        return configPath;
+        return (configPath, activeNode);
     }
 
-    private Dictionary<string, object> BuildConfig(AppSettings settings)
+    private Dictionary<string, object> BuildConfig(
+        AppSettings settings, bool requireSelectedNode, out string? activeNode)
     {
         var usedTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -53,9 +57,10 @@ public sealed class SingBoxConfigWriter
             "block"
         };
         var outbounds = new List<Dictionary<string, object>>();
-        var proxyTags = new List<string>();
+        var proxyTags = new HashSet<string>(StringComparer.Ordinal);
+        var (nodes, proxies) = _proxyCatalogStore.LoadOutbounds();
 
-        foreach (var proxy in _proxyCatalogStore.LoadProxyDefinitions())
+        foreach (var proxy in proxies)
         {
             if (TryBuildOutbound(proxy, usedTags, out var outbound))
             {
@@ -64,59 +69,7 @@ public sealed class SingBoxConfigWriter
             }
         }
 
-        var groups = _proxyCatalogStore.LoadProxyGroups();
-        var groupTags = groups.Select(RoutingDefaults.GroupName).Where(usedTags.Add).ToList();
-        var nodes = _proxyCatalogStore.LoadNodes();
-        var flatTags = RoutingDefaults.GetFlatNodes(nodes, groups)
-            .Select(node => node.Name).Where(proxyTags.Contains).Distinct().ToList();
-        var flatGroup = RoutingDefaults.GetFlatGroupName(nodes, groups);
-        if (flatTags.Count > 0)
-        {
-            flatTags.AddRange(new[] { "direct", "block" });
-            outbounds.Add(BuildGroup(flatGroup, flatTags));
-            usedTags.Add(flatGroup);
-        }
-
-        foreach (var group in groups.Where(group => groupTags.Contains(RoutingDefaults.GroupName(group))))
-        {
-            var tag = RoutingDefaults.GroupName(group);
-            var members = RoutingDefaults.Names(group, "proxies")
-                .Select(name => MapPolicy(name, "direct", usedTags))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            if (members.Count == 0)
-            {
-                members.Add("direct");
-            }
-
-            var outbound = BuildGroup(tag, members);
-            var type = GetString(group, "type");
-            if (type.Equals("url-test", StringComparison.OrdinalIgnoreCase))
-            {
-                outbound["type"] = "urltest";
-                outbound.Remove("default");
-                AddIfNotBlank(outbound, "url", GetString(group, "url"));
-                var interval = GetInt(group, "interval");
-                if (interval > 0)
-                {
-                    outbound["interval"] = $"{interval}s";
-                }
-                var tolerance = GetInt(group, "tolerance");
-                if (tolerance > 0)
-                {
-                    outbound["tolerance"] = tolerance;
-                }
-            }
-            else if (members.Contains(GetString(group, "default-selected")))
-            {
-                outbound["default"] = GetString(group, "default-selected");
-            }
-
-            outbounds.Add(outbound);
-        }
-
-        var selectionTag = groupTags.FirstOrDefault() ?? (flatTags.Count > 0 ? flatGroup : "direct");
-        var globalTag = usedTags.Contains(settings.SelectionGroup) ? settings.SelectionGroup : selectionTag;
+        activeNode = RoutingDefaults.ResolveSelectedNode(settings, nodes, proxyTags, requireSelectedNode);
 
         outbounds.Add(new Dictionary<string, object>
         {
@@ -138,7 +91,7 @@ public sealed class SingBoxConfigWriter
             },
             ["inbounds"] = BuildInbounds(settings),
             ["outbounds"] = outbounds,
-            ["route"] = BuildRoute(settings, selectionTag, globalTag, usedTags),
+            ["route"] = BuildRoute(settings, activeNode ?? "direct"),
             ["experimental"] = new Dictionary<string, object>
             {
                 ["clash_api"] = new Dictionary<string, object>
@@ -168,30 +121,19 @@ public sealed class SingBoxConfigWriter
         return inbounds;
     }
 
-    private static Dictionary<string, object> BuildGroup(string tag, IReadOnlyList<string> members)
+    private Dictionary<string, object> BuildRoute(AppSettings settings, string selectedNode)
     {
-        return new Dictionary<string, object>
+        if (settings.Mode is "global" or "direct")
         {
-            ["type"] = "selector",
-            ["tag"] = tag,
-            ["outbounds"] = members,
-            ["default"] = members[0]
-        };
-    }
+            return new Dictionary<string, object> { ["final"] = settings.Mode == "global" ? selectedNode : "direct" };
+        }
 
-    private Dictionary<string, object> BuildRoute(
-        AppSettings settings, string fallback, string globalTag, HashSet<string> targets)
-    {
-        var rules = new List<Dictionary<string, object>>
-        {
-            new() { ["clash_mode"] = "direct", ["outbound"] = "direct" },
-            new() { ["clash_mode"] = "global", ["outbound"] = globalTag }
-        };
+        var rules = new List<Dictionary<string, object>>();
         AddBlockedSiteRules(rules, settings.BlockedSites);
         var defaultRules = _defaultRulesService.Rules;
         var customRules = _rulesStore.LoadRules();
-        var subscriptionRules = _proxyCatalogStore.LoadRules();
-        var finalOutbound = fallback;
+        var (subscriptionRules, _) = _subscriptionService.LoadRoutingRules(settings.SubscriptionRulesProfileId);
+        var finalOutbound = selectedNode;
         var mainlandDomains = new Dictionary<string, object>();
         foreach (var group in defaultRules.Where(rule => rule.StartsWith("DOMAIN", StringComparison.Ordinal))
                      .Select(rule => rule.Split(',')).GroupBy(parts => parts[0].ToLowerInvariant().Replace('-', '_')))
@@ -209,13 +151,13 @@ public sealed class SingBoxConfigWriter
                 var parts = RoutingDefaults.SplitRule(rule);
                 if (parts.Count >= 2 && RoutingDefaults.IsMatch(rule))
                 {
-                    finalOutbound = MapPolicy(parts[1].Trim(), fallback, targets);
+                    finalOutbound = MapPolicy(parts[1].Trim(), selectedNode);
                     continue;
                 }
 
                 if (parts.Count >= 3 && parts[1].Trim().Equals("CN", StringComparison.OrdinalIgnoreCase))
                 {
-                    var outbound = MapPolicy(parts[2].Trim(), fallback, targets);
+                    var outbound = MapPolicy(parts[2].Trim(), selectedNode);
                     switch (parts[0].Trim().ToUpperInvariant())
                     {
                         case "GEOIP":
@@ -225,22 +167,21 @@ public sealed class SingBoxConfigWriter
                             rules.Add(new Dictionary<string, object>(mainlandDomains) { ["outbound"] = outbound });
                             continue;
                     }
-
                 }
 
-                if (TryConvertClashRule(rule, fallback, out var converted, targets))
+                if (TryConvertClashRule(rule, selectedNode, out var converted))
                 {
                     rules.Add(converted);
                 }
             }
         }
 
-        AddRules(customRules.Where(rule => !RoutingDefaults.IsMatch(rule)));
+        var orderedRules = RoutingDefaults.ComposeRules(customRules, Array.Empty<string>(), subscriptionRules, selectedNode).ToList();
+        AddRules(orderedRules.Take(orderedRules.Count - 1));
         AddDomainSuffixRule(rules, DefaultBlockDomainSuffixes, "block");
         rules.Add(new Dictionary<string, object>(mainlandDomains) { ["outbound"] = "direct" });
         AddIpCidrRule(rules, mainlandIps, "direct");
-        AddRules(RoutingDefaults.ComposeRules(customRules, Array.Empty<string>(), subscriptionRules, fallback)
-            .Skip(customRules.Count(rule => !RoutingDefaults.IsMatch(rule))));
+        AddRules(orderedRules.TakeLast(1));
 
         return new Dictionary<string, object>
         {
@@ -530,8 +471,7 @@ public sealed class SingBoxConfigWriter
         };
     }
 
-    private static bool TryConvertClashRule(string rule, string finalOutbound, out Dictionary<string, object> converted,
-        HashSet<string>? targets = null)
+    private static bool TryConvertClashRule(string rule, string finalOutbound, out Dictionary<string, object> converted)
     {
         converted = new Dictionary<string, object>();
         if (string.IsNullOrWhiteSpace(rule))
@@ -558,7 +498,7 @@ public sealed class SingBoxConfigWriter
         }
 
         var value = parts[1].Trim();
-        var outbound = MapPolicy(parts[policyIndex], finalOutbound, targets);
+        var outbound = MapPolicy(parts[policyIndex].Trim(), finalOutbound);
         if (string.IsNullOrWhiteSpace(value))
         {
             return false;
@@ -714,7 +654,7 @@ public sealed class SingBoxConfigWriter
             };
     }
 
-    private static string MapPolicy(string policy, string finalOutbound, HashSet<string>? targets = null)
+    private static string MapPolicy(string policy, string finalOutbound)
     {
         if (policy.Equals("DIRECT", StringComparison.OrdinalIgnoreCase))
         {
@@ -727,7 +667,7 @@ public sealed class SingBoxConfigWriter
             return "block";
         }
 
-        return targets?.TryGetValue(policy, out var tag) == true ? tag : finalOutbound;
+        return finalOutbound;
     }
 
     private static string UniqueTag(string name, HashSet<string> usedTags)

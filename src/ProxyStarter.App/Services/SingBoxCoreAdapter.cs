@@ -15,11 +15,11 @@ public sealed class SingBoxCoreAdapter : IProxyCoreAdapter
 
     public string CoreType => "sing-box";
     public string DisplayName => "sing-box";
-    public bool SupportsMihomoApi => false;
+    public bool SupportsConfigReload => false;
 
-    public string EnsureConfig(AppSettings settings)
+    public (string Path, string? NodeName) EnsureConfig(AppSettings settings, bool requireSelectedNode = false)
     {
-        return _configWriter.EnsureConfig(settings);
+        return _configWriter.EnsureConfig(settings, requireSelectedNode);
     }
 
     public MihomoLaunchOptions CreateLaunchOptions(AppSettings settings, string configPath)

@@ -8,8 +8,7 @@ namespace ProxyStarter.App.Services;
 public sealed class ConnectionMonitorService : IDisposable
 {
     private readonly MihomoApiClient _apiClient;
-    private readonly AppSettingsStore _settingsStore;
-    private readonly ProxyCatalogStore _proxyCatalogStore;
+    private readonly CoreController _coreController;
     private readonly System.Threading.Timer _timer;
     private CancellationTokenSource? _cts;
     private volatile bool _isRunning;
@@ -17,11 +16,10 @@ public sealed class ConnectionMonitorService : IDisposable
 
     public event EventHandler<ConnectionStatusSnapshot>? StatusUpdated;
 
-    public ConnectionMonitorService(MihomoApiClient apiClient, AppSettingsStore settingsStore, ProxyCatalogStore proxyCatalogStore)
+    public ConnectionMonitorService(MihomoApiClient apiClient, CoreController coreController)
     {
         _apiClient = apiClient;
-        _settingsStore = settingsStore;
-        _proxyCatalogStore = proxyCatalogStore;
+        _coreController = coreController;
         _timer = new System.Threading.Timer(OnTick);
     }
 
@@ -67,9 +65,6 @@ public sealed class ConnectionMonitorService : IDisposable
         try
         {
             var connections = await _apiClient.GetConnectionsAsync(token).ConfigureAwait(false);
-            var settings = _settingsStore.Settings;
-            var selectionGroup = _proxyCatalogStore.ResolveSelectionGroup(settings);
-            var activeNode = await _apiClient.GetResolvedSelectedProxyAsync(selectionGroup, token).ConfigureAwait(false);
             if (token.IsCancellationRequested || !_isRunning)
             {
                 return;
@@ -78,7 +73,7 @@ public sealed class ConnectionMonitorService : IDisposable
             var snapshot = new ConnectionStatusSnapshot(
                 connections?.UploadTotal ?? 0,
                 connections?.DownloadTotal ?? 0,
-                activeNode ?? selectionGroup,
+                _coreController.IsRunning ? _coreController.ActiveNodeName ?? string.Empty : string.Empty,
                 connections?.CurrentAddress);
 
             StatusUpdated?.Invoke(this, snapshot);

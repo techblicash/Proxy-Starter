@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Runtime.InteropServices;
@@ -28,7 +28,8 @@ public partial class MainWindow : FluentWindow
     private readonly MainWindowViewModel _viewModel;
     private readonly INavigationService _navigationService;
     private readonly LocalizationService _localizationService;
-    private readonly MihomoApiClient _apiClient;
+    private readonly CoreController _coreController;
+    private readonly IDialogService _dialogService;
     private readonly AppSettingsStore _settingsStore;
     private readonly ProxyCatalogStore _proxyCatalogStore;
 
@@ -40,14 +41,16 @@ public partial class MainWindow : FluentWindow
         INavigationService navigationService,
         INavigationViewPageProvider pageProvider,
         LocalizationService localizationService,
-        MihomoApiClient apiClient,
+        CoreController coreController,
+        IDialogService dialogService,
         AppSettingsStore settingsStore,
         ProxyCatalogStore proxyCatalogStore)
     {
         _viewModel = viewModel;
         _navigationService = navigationService;
         _localizationService = localizationService;
-        _apiClient = apiClient;
+        _coreController = coreController;
+        _dialogService = dialogService;
         _settingsStore = settingsStore;
         _proxyCatalogStore = proxyCatalogStore;
 
@@ -452,7 +455,7 @@ public partial class MainWindow : FluentWindow
         var cursorX = cursor.X / scale;
         var cursorY = cursor.Y / scale;
 
-        var menuWindow = new Views.TrayMenuWindow(_viewModel, _apiClient, _settingsStore, _proxyCatalogStore)
+        var menuWindow = new Views.TrayMenuWindow(_viewModel, _coreController, _dialogService, _settingsStore, _proxyCatalogStore)
         {
             Topmost = true,
             ShowInTaskbar = false,

@@ -56,12 +56,6 @@ public sealed class SubscriptionCacheStore
 
             Try(() =>
             {
-                var groupsYaml = _serializer.Serialize(result.ProxyGroups);
-                AtomicFile.WriteAllText(GetGroupsPath(profileId), groupsYaml, new UTF8Encoding(false));
-            }, "Save groups cache");
-
-            Try(() =>
-            {
                 var ruleProvidersYaml = _serializer.Serialize(result.RuleProviders);
                 AtomicFile.WriteAllText(GetRuleProvidersPath(profileId), ruleProvidersYaml, new UTF8Encoding(false));
             }, "Save rule providers cache");
@@ -112,7 +106,6 @@ public sealed class SubscriptionCacheStore
         try
         {
             var proxies = LoadProxies(profileId);
-            var groups = LoadGroups(profileId);
 
             var root = DeserializeYamlMapping(baseContent);
             if (root.Count == 0)
@@ -127,11 +120,6 @@ public sealed class SubscriptionCacheStore
             if (proxies.Count > 0 || !root.ContainsKey("proxies"))
             {
                 root["proxies"] = proxies;
-            }
-
-            if (groups.Count > 0 || !root.ContainsKey("proxy-groups"))
-            {
-                root["proxy-groups"] = groups;
             }
 
             var ruleProviders = LoadRuleProviders(profileId);
@@ -197,34 +185,6 @@ public sealed class SubscriptionCacheStore
                     catch (Exception ex)
                     {
                         CrashLogger.Log(ex, "SubscriptionCacheStore: Load proxies");
-                    }
-                }
-
-                return new List<Dictionary<string, object>>();
-            }
-        }
-        catch
-        {
-            return new List<Dictionary<string, object>>();
-        }
-    }
-
-    public IReadOnlyList<Dictionary<string, object>> LoadGroups(string profileId)
-    {
-        try
-        {
-            lock (_sync)
-            {
-                foreach (var yaml in AtomicFile.ReadTextCandidates(GetGroupsPath(profileId)))
-                {
-                    try
-                    {
-                        return _deserializer.Deserialize<List<Dictionary<string, object>>>(yaml)
-                               ?? new List<Dictionary<string, object>>();
-                    }
-                    catch (Exception ex)
-                    {
-                        CrashLogger.Log(ex, "SubscriptionCacheStore: Load groups");
                     }
                 }
 
@@ -310,11 +270,6 @@ public sealed class SubscriptionCacheStore
     private string GetProxiesPath(string profileId)
     {
         return Path.Combine(_cacheDirectory, $"{profileId}.proxies.yaml");
-    }
-
-    private string GetGroupsPath(string profileId)
-    {
-        return Path.Combine(_cacheDirectory, $"{profileId}.groups.yaml");
     }
 
     private string GetRuleProvidersPath(string profileId)

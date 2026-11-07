@@ -6,6 +6,7 @@ namespace ProxyStarter.App.Services;
 
 public sealed class AutoStartService
 {
+    internal const string StartupArgument = "--windows-startup";
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string AppValueName = "ProxyStarter";
 
@@ -52,7 +53,7 @@ public sealed class AutoStartService
                 return;
             }
 
-            key.SetValue(AppValueName, $"\"{exePath}\"");
+            key.SetValue(AppValueName, $"\"{exePath}\" {StartupArgument}");
         }
         catch
         {

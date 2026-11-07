@@ -403,6 +403,30 @@
                                                 <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
                                             <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_AutoStartCore}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_AutoStartCoreHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <CheckBox Grid.Column="1" IsChecked="{Binding AutoStartCore}" VerticalAlignment="Center" />
+                                        </Grid>
+
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="{DynamicResource Text_HideToTrayOnWindowsStartup}" Style="{StaticResource SettingsItemTitleStyle}" />
+                                                <TextBlock Text="{DynamicResource Text_HideToTrayOnWindowsStartupHint}" Style="{StaticResource SettingsItemHintStyle}" />
+                                            </StackPanel>
+                                            <CheckBox Grid.Column="1" IsChecked="{Binding HideToTrayOnWindowsStartup}" VerticalAlignment="Center" />
+                                        </Grid>
+
+                                        <Grid Style="{StaticResource SettingsRowStyle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
                                                 <TextBlock Text="{DynamicResource Text_UpdateFeedUrl}" Style="{StaticResource SettingsItemTitleStyle}" />
                                                 <TextBlock Text="{DynamicResource Text_UpdateFeedUrlHint}"
                                                            Style="{StaticResource SettingsItemHintStyle}" />

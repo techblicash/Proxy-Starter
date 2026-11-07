@@ -4,67 +4,47 @@ namespace ProxyStarter.App.Services;
 
 public static class RoutingDefaults
 {
-    public const string FlatModeSelectionGroup = "PROXY";
-    public const string GroupSourceKey = "x-proxy-starter-source-id";
+    internal static string OutboundName(Dictionary<string, object> proxy) =>
+        proxy.TryGetValue("name", out var value) ? value?.ToString() ?? string.Empty : string.Empty;
 
-    public static string GroupName(Dictionary<string, object> group) =>
-        group.TryGetValue("name", out var value) ? value?.ToString() ?? string.Empty : string.Empty;
+    internal static string OriginalName(ProxyNode node) =>
+        string.IsNullOrEmpty(node.OriginalName) ? node.Name : node.OriginalName;
 
-    public static List<ProxyNode> GetFlatNodes(
-        IReadOnlyList<ProxyNode> nodes, IReadOnlyList<Dictionary<string, object>> groups)
+    internal static ProxyNode? FindSelectedNode(AppSettings settings, IEnumerable<ProxyNode> nodes) =>
+        nodes.FirstOrDefault(node => string.Equals(node.SourceId, settings.SelectedNodeSourceId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(OriginalName(node), settings.SelectedNodeName, StringComparison.Ordinal));
+
+    internal static string? ResolveSelectedNode(
+        AppSettings settings, IReadOnlyList<ProxyNode> nodes, HashSet<string> outboundNames, bool requireSelectedNode)
     {
-        var groupedSources = groups.Select(GroupSource).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return nodes.Where(node => !groupedSources.Contains(node.SourceId)).ToList();
-    }
-
-    public static string GetFlatGroupName(
-        IReadOnlyList<ProxyNode> nodes, IReadOnlyList<Dictionary<string, object>> groups)
-    {
-        var names = nodes.Select(node => node.Name).Concat(groups.Select(GroupName))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var name = FlatModeSelectionGroup;
-        for (var suffix = 2; names.Contains(name); suffix++)
+        var available = nodes.Where(node => outboundNames.Contains(node.Name)).ToList();
+        var selected = FindSelectedNode(settings, available);
+        if (requireSelectedNode && selected is null)
         {
-            name = $"{FlatModeSelectionGroup} {suffix}";
+            throw new InvalidOperationException($"The selected node is unavailable for this core: {settings.SelectedNodeName}");
         }
 
-        return name;
+        return (selected ?? available.FirstOrDefault())?.Name;
     }
 
-    public static string GroupSource(Dictionary<string, object> group) =>
-        group.TryGetValue(GroupSourceKey, out var value) ? value?.ToString() ?? string.Empty : string.Empty;
-
-    internal static string GetDefaultGroupName(
-        IReadOnlyList<Dictionary<string, object>> groups, bool hasFlatNodes, string flatGroup) =>
-        groups.Count > 0 ? GroupName(groups[0]) : hasFlatNodes ? flatGroup : "DIRECT";
-
-    public static IEnumerable<string> Names(Dictionary<string, object> group, string key)
-    {
-        if (!group.TryGetValue(key, out var value))
+    internal static string MapMihomoTarget(string target, string selectedNode) =>
+        target.ToUpperInvariant() switch
         {
-            return Array.Empty<string>();
-        }
-
-        return value is IEnumerable<object> items
-            ? items.Select(item => item?.ToString() ?? string.Empty).Where(name => !string.IsNullOrWhiteSpace(name))
-            : value is string name && !string.IsNullOrWhiteSpace(name) ? new[] { name } : Array.Empty<string>();
-    }
+            "DIRECT" or "REJECT" or "REJECT-DROP" or "PASS" or "COMPATIBLE" or "DNS" => target.ToUpperInvariant(),
+            _ => selectedNode
+        };
 
     public static bool IsMatch(string rule) =>
         rule.Split(',', 2)[0].Trim().Equals("MATCH", StringComparison.OrdinalIgnoreCase);
 
     internal static string RewriteRule(
-        string rule, Func<string, string> mapTarget, Func<string, string>? mapRuleProvider = null)
+        string rule, Func<string, string> mapTarget)
     {
         var parts = SplitRule(rule);
         var targetIndex = IsMatch(rule) ? 1 : 2;
         if (parts.Count > targetIndex)
         {
             parts[targetIndex] = mapTarget(parts[targetIndex].Trim());
-            if (mapRuleProvider is not null && parts[0].Trim().Equals("RULE-SET", StringComparison.OrdinalIgnoreCase))
-            {
-                parts[1] = mapRuleProvider(parts[1].Trim());
-            }
         }
 
         return string.Join(",", parts);
@@ -101,8 +81,8 @@ public static class RoutingDefaults
         IReadOnlyList<string> subscriptionRules, string fallback)
     {
         return customRules.Where(rule => !IsMatch(rule))
-            .Concat(defaultRules)
             .Concat(subscriptionRules.TakeWhile(rule => !IsMatch(rule)))
+            .Concat(defaultRules)
             .Append(customRules.FirstOrDefault(IsMatch) ?? subscriptionRules.FirstOrDefault(IsMatch) ?? $"MATCH,{fallback}");
     }
 }

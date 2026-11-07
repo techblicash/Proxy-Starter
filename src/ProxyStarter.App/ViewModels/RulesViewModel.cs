@@ -2,20 +2,29 @@ using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using ProxyStarter.App.Helpers;
+using ProxyStarter.App.Models;
 using ProxyStarter.App.Services;
 
 namespace ProxyStarter.App.ViewModels;
 
-public partial class RulesViewModel : ObservableObject
+public partial class RulesViewModel : ObservableObject, IPageLifecycleAware
 {
     private readonly AppSettingsStore _settingsStore;
-    private readonly MihomoApiClient _apiClient;
+    private readonly CoreController _coreController;
+    private readonly SubscriptionService _subscriptionService;
     private readonly IDialogService _dialogService;
     private readonly RulesStore _rulesStore;
     private readonly LocalizationService _localization;
 
     [ObservableProperty]
     private string _selectedMode;
+
+    [ObservableProperty]
+    private IReadOnlyList<SubscriptionProfile> _subscriptionRuleSources = Array.Empty<SubscriptionProfile>();
+
+    [ObservableProperty]
+    private string? _selectedSubscriptionRulesId;
 
     [ObservableProperty]
     private string _rulesText = string.Empty;
@@ -29,13 +38,15 @@ public partial class RulesViewModel : ObservableObject
 
     public RulesViewModel(
         AppSettingsStore settingsStore,
-        MihomoApiClient apiClient,
+        CoreController coreController,
+        SubscriptionService subscriptionService,
         IDialogService dialogService,
         RulesStore rulesStore,
         LocalizationService localization)
     {
         _settingsStore = settingsStore;
-        _apiClient = apiClient;
+        _coreController = coreController;
+        _subscriptionService = subscriptionService;
         _dialogService = dialogService;
         _rulesStore = rulesStore;
         _localization = localization;
@@ -43,25 +54,47 @@ public partial class RulesViewModel : ObservableObject
         _rulesText = _rulesStore.LoadText();
     }
 
+    public void OnPageActivated()
+    {
+        var sources = new List<SubscriptionProfile>
+        {
+            new() { Id = string.Empty, Name = _localization.GetString("Text_NoSubscriptionRules", "Use built-in and custom rules") }
+        };
+        sources.AddRange(_subscriptionService.GetRuleSources());
+        SubscriptionRuleSources = sources;
+        var savedId = _settingsStore.Settings.SubscriptionRulesProfileId;
+        SelectedSubscriptionRulesId = sources.FirstOrDefault(source => source.Id == savedId)?.Id ?? string.Empty;
+    }
+
+    public void OnPageDeactivated() { }
+
     [RelayCommand]
     private async Task SaveModeAsync()
     {
         try
         {
-            _settingsStore.Settings.Mode = SelectedMode;
-            _settingsStore.Save();
+            await _coreController.SetRoutingModeAsync(SelectedMode);
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
+            SelectedMode = _settingsStore.Settings.Mode;
             CrashLogger.Log(ex, "RulesViewModel: Save mode");
             await _dialogService.ShowErrorAsync(DialogError.ModeSave, ex.Message);
-            return;
         }
+    }
 
-        var ok = await _apiClient.SetModeAsync(SelectedMode);
-        if (!ok)
+    [RelayCommand]
+    private async Task SaveSubscriptionRulesAsync()
+    {
+        try
         {
-            await _dialogService.ShowErrorAsync(DialogError.ModeUpdate);
+            await _coreController.SetSubscriptionRulesAsync(SelectedSubscriptionRulesId ?? string.Empty);
+        }
+        catch (Exception ex)
+        {
+            OnPageActivated();
+            CrashLogger.Log(ex, "RulesViewModel: Save subscription routing rules");
+            await _dialogService.ShowErrorAsync(DialogError.RulesSave, ex.Message);
         }
     }
 

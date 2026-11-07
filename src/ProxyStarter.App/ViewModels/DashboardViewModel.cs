@@ -355,8 +355,7 @@ public partial class DashboardViewModel : ObservableObject, IPageLifecycleAware
         if (string.IsNullOrWhiteSpace(activeNode)
             || activeNode.Equals("DIRECT", StringComparison.OrdinalIgnoreCase)
             || activeNode.Equals("REJECT", StringComparison.OrdinalIgnoreCase)
-            || activeNode.Equals("GLOBAL", StringComparison.OrdinalIgnoreCase)
-            || activeNode.Equals(RoutingDefaults.FlatModeSelectionGroup, StringComparison.OrdinalIgnoreCase))
+            || activeNode.Equals("GLOBAL", StringComparison.OrdinalIgnoreCase))
         {
             return "None";
         }

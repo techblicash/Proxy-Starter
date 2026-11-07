@@ -18,28 +18,18 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
     private readonly ProxyCatalogStore _proxyCatalogStore;
     private readonly SubscriptionStore _subscriptionStore;
     private readonly SubscriptionCacheStore _subscriptionCacheStore;
-    private readonly MihomoApiClient _apiClient;
+    private readonly CoreController _coreController;
     private readonly LatencyTestService _latencyTestService;
     private readonly AppSettingsStore _settingsStore;
     private readonly IDialogService _dialogService;
     private readonly DispatcherTimer _activeTimer;
     private bool _isActive;
-    private readonly Dictionary<string, List<ProxyNode>> _nodeLookup = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, List<ProxyNode>> _displayLookup = new(StringComparer.OrdinalIgnoreCase);
     private List<ProxyNode> _allNodes = new();
     private IReadOnlyList<ProxyNode> _currentDisplayNodes = Array.Empty<ProxyNode>();
     private Dictionary<string, string> _sourceNames = new(StringComparer.OrdinalIgnoreCase);
-    private IReadOnlyList<Dictionary<string, object>> _catalogGroups = Array.Empty<Dictionary<string, object>>();
     private string? _scopeId;
-    private string _flatGroup = RoutingDefaults.FlatModeSelectionGroup;
     private bool _scopeDisabled;
-    private bool _loadingGroups;
     private CancellationTokenSource? _loadCts;
-    private CancellationTokenSource? _rowsCts;
-    private CancellationTokenSource? _selectionSaveCts;
-    private string? _activeNodeName;
-    private string? _activeGroupName;
-    private int _activeUpdateInProgress;
 
     [ObservableProperty]
     private ProxyNode? _selectedNode;
@@ -51,23 +41,17 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
     private bool _isSpeedTestingAll;
 
     [ObservableProperty]
-    private string _selectedGroup;
-
-    [ObservableProperty]
     private int _cardsPerRow = 2;
 
     public ObservableRangeCollection<ProxyNode> Nodes { get; } = new();
     public ObservableRangeCollection<NodeCardRow> NodeRows { get; } = new();
-    public ObservableRangeCollection<string> Groups { get; } = new();
-    public bool ShowSelectionGroup => Groups.Count > 0;
-
     public double SavedScrollOffset { get; set; }
 
     public NodesViewModel(
         ProxyCatalogStore proxyCatalogStore,
         SubscriptionStore subscriptionStore,
         SubscriptionCacheStore subscriptionCacheStore,
-        MihomoApiClient apiClient,
+        CoreController coreController,
         LatencyTestService latencyTestService,
         AppSettingsStore settingsStore,
         IDialogService dialogService)
@@ -75,17 +59,16 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         _proxyCatalogStore = proxyCatalogStore;
         _subscriptionStore = subscriptionStore;
         _subscriptionCacheStore = subscriptionCacheStore;
-        _apiClient = apiClient;
+        _coreController = coreController;
         _latencyTestService = latencyTestService;
         _settingsStore = settingsStore;
         _dialogService = dialogService;
-        _selectedGroup = settingsStore.Settings.SelectionGroup;
 
         _activeTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromSeconds(3)
         };
-        _activeTimer.Tick += async (_, _) => await UpdateActiveNodeAsync();
+        _activeTimer.Tick += (_, _) => UpdateActiveNode();
         // Timer runs only while the Nodes page is visible.
     }
 
@@ -99,22 +82,6 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         RefreshRowsFromCurrent();
     }
 
-    partial void OnSelectedGroupChanged(string value)
-    {
-        if (_loadingGroups || string.IsNullOrWhiteSpace(value))
-        {
-            return;
-        }
-
-        QueueSelectionGroupSave(value);
-
-        if (_isActive)
-        {
-            _ = RefreshNodeRowsAsync();
-            _ = UpdateActiveNodeAsync();
-        }
-    }
-
     [RelayCommand]
     private void RefreshNodes()
     {
@@ -122,38 +89,7 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
     }
 
     [RelayCommand]
-    private async Task SelectNodeAsync()
-    {
-        if (SelectedNode is null || _scopeDisabled)
-        {
-            return;
-        }
-
-        var groupName = GetGroupName();
-        bool success;
-        try
-        {
-            success = await _apiClient.SetProxySelectionAsync(groupName, SelectedNode.Name);
-        }
-        catch
-        {
-            success = false;
-        }
-
-        if (!success)
-        {
-            try
-            {
-                await _dialogService.ShowErrorAsync(DialogError.NodeSelection);
-            }
-            catch
-            {
-            }
-            return;
-        }
-
-        await UpdateActiveNodeAsync();
-    }
+    private Task SelectNodeAsync() => SelectNodeFromCardAsync(SelectedNode);
 
     [RelayCommand]
     private async Task TcpTestAsync()
@@ -220,30 +156,16 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
 
         SelectedNode = node;
 
-        var groupName = GetGroupName();
-        bool success;
         try
         {
-            success = await _apiClient.SetProxySelectionAsync(groupName, node.Name);
+            await _coreController.SelectNodeAsync(node);
+            UpdateActiveNode();
         }
-        catch
+        catch (Exception ex)
         {
-            success = false;
+            CrashLogger.Log(ex, "NodesViewModel: Select node");
+            await _dialogService.ShowErrorAsync(DialogError.NodeSelection, ex.Message);
         }
-
-        if (!success)
-        {
-            try
-            {
-                await _dialogService.ShowErrorAsync(DialogError.NodeSelection);
-            }
-            catch
-            {
-            }
-            return;
-        }
-
-        await UpdateActiveNodeAsync();
     }
 
     [RelayCommand]
@@ -372,11 +294,8 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         var scopeId = _subscriptionStore.SelectedProfileId;
         if (!string.Equals(_scopeId, scopeId, StringComparison.OrdinalIgnoreCase))
         {
-            _rowsCts?.Cancel();
             Nodes.ReplaceRange(Array.Empty<ProxyNode>());
             NodeRows.ReplaceRange(Array.Empty<NodeCardRow>());
-            Groups.ReplaceRange(Array.Empty<string>());
-            OnPropertyChanged(nameof(ShowSelectionGroup));
             SelectedNode = null;
             _currentDisplayNodes = Array.Empty<ProxyNode>();
             _scopeId = scopeId;
@@ -390,18 +309,12 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
                 var names = profiles.GroupBy(profile => profile.Id, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(group => group.Key, group => group.First().Name, StringComparer.OrdinalIgnoreCase);
                 var allNodes = _proxyCatalogStore.LoadNodes();
-                var allGroups = _proxyCatalogStore.LoadProxyGroups();
                 var profile = profiles.FirstOrDefault(profile => profile.Id == scopeId);
                 var disabled = profile is { IsEnabled: false };
                 var nodes = scopeId is null ? allNodes
                     : disabled ? _subscriptionCacheStore.LoadNodes(scopeId)
                     : allNodes.Where(node => node.SourceId == scopeId).ToList();
-                var groups = scopeId is null ? allGroups
-                    : disabled ? _subscriptionCacheStore.LoadGroups(scopeId)
-                    : allGroups.Where(group => RoutingDefaults.GroupSource(group) == scopeId).ToList();
-
-                return (Nodes: nodes.ToList(), Groups: groups, SourceNames: names, Disabled: disabled,
-                    FlatGroup: RoutingDefaults.GetFlatGroupName(allNodes, allGroups));
+                return (Nodes: nodes.ToList(), SourceNames: names, Disabled: disabled);
             }, cts.Token);
 
             if (cts.IsCancellationRequested || !ReferenceEquals(_loadCts, cts))
@@ -410,17 +323,13 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
             }
 
             _allNodes = catalog.Nodes;
-            _catalogGroups = catalog.Groups;
             _sourceNames = catalog.SourceNames;
-            _flatGroup = catalog.FlatGroup;
             _scopeDisabled = catalog.Disabled;
-            _activeNodeName = null;
-            _activeGroupName = null;
-            RebuildNodeLookup(_allNodes);
+            _currentDisplayNodes = _allNodes;
             Nodes.ReplaceRange(_allNodes);
-            LoadGroupsFromCatalog();
-            await RefreshNodeRowsAsync();
-            await UpdateActiveNodeAsync();
+            UpdateActiveNode();
+            RefreshRowsFromCurrent();
+            SelectedNode = _allNodes.FirstOrDefault(node => node.IsActive) ?? _allNodes.FirstOrDefault();
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
@@ -435,80 +344,6 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         }
     }
 
-    private void LoadGroupsFromCatalog()
-    {
-        var groupNames = _catalogGroups.Select(RoutingDefaults.GroupName)
-            .Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var preferredGroup = groupNames.FirstOrDefault(name =>
-            name.Equals(_settingsStore.Settings.SelectionGroup, StringComparison.OrdinalIgnoreCase));
-
-        _loadingGroups = true;
-        try
-        {
-            Groups.ReplaceRange(groupNames);
-            SelectedGroup = preferredGroup ?? groupNames.FirstOrDefault() ?? string.Empty;
-            OnPropertyChanged(nameof(ShowSelectionGroup));
-        }
-        finally
-        {
-            _loadingGroups = false;
-        }
-    }
-
-    private async Task RefreshNodeRowsAsync()
-    {
-        _rowsCts?.Cancel();
-        var cts = new CancellationTokenSource();
-        _rowsCts = cts;
-
-        var groupName = GetGroupName();
-        var cardsPerRow = CardsPerRow;
-        var nodes = _allNodes;
-
-        if (cts.IsCancellationRequested)
-        {
-            return;
-        }
-
-        var filtered = await BuildDisplayNodesForGroupAsync(nodes, groupName, cts.Token).ConfigureAwait(false);
-        if (cts.IsCancellationRequested || !ReferenceEquals(_rowsCts, cts))
-        {
-            return;
-        }
-
-        var rows = BuildRows(filtered, cardsPerRow);
-        void Apply()
-        {
-            if (cts.IsCancellationRequested || !ReferenceEquals(_rowsCts, cts))
-            {
-                return;
-            }
-
-            _currentDisplayNodes = filtered;
-            NodeRows.ReplaceRange(rows);
-            RebuildDisplayLookup(filtered);
-            if (SelectedNode is null || !filtered.Contains(SelectedNode))
-            {
-                SelectedNode = filtered.Count > 0 ? filtered[0] : null;
-            }
-        }
-
-        if (Application.Current is null)
-        {
-            Apply();
-        }
-        else
-        {
-            try
-            {
-                await Application.Current.Dispatcher.InvokeAsync(Apply, DispatcherPriority.Background);
-            }
-            catch
-            {
-            }
-        }
-    }
-
     private void RefreshRowsFromCurrent()
     {
         try
@@ -519,95 +354,6 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         catch
         {
         }
-    }
-
-    private string GetGroupName() => string.IsNullOrWhiteSpace(SelectedGroup) ? _flatGroup : SelectedGroup;
-
-    private void QueueSelectionGroupSave(string selectionGroup)
-    {
-        if (_scopeDisabled)
-        {
-            return;
-        }
-
-        if (string.Equals(_settingsStore.Settings.SelectionGroup, selectionGroup, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        _settingsStore.Settings.SelectionGroup = selectionGroup;
-
-        _selectionSaveCts?.Cancel();
-        _selectionSaveCts?.Dispose();
-
-        var cts = new CancellationTokenSource();
-        _selectionSaveCts = cts;
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(450, cts.Token).ConfigureAwait(false);
-                if (!cts.IsCancellationRequested)
-                {
-                    _settingsStore.Save();
-                }
-            }
-            catch
-            {
-            }
-            finally
-            {
-                if (ReferenceEquals(_selectionSaveCts, cts))
-                {
-                    _selectionSaveCts = null;
-                }
-
-                cts.Dispose();
-            }
-        });
-    }
-
-    private async Task<List<ProxyNode>> BuildDisplayNodesForGroupAsync(
-        IReadOnlyList<ProxyNode> nodes,
-        string groupName,
-        CancellationToken cancellationToken)
-    {
-        var group = _catalogGroups.FirstOrDefault(group => RoutingDefaults.GroupName(group) == groupName);
-        if (group is null)
-        {
-            return nodes.ToList();
-        }
-
-        var configuredMembers = RoutingDefaults.Names(group, "proxies").ToList();
-        var groups = _catalogGroups.Select(RoutingDefaults.GroupName).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var members = configuredMembers;
-        if (!_scopeDisabled)
-        {
-            var snapshot = await _apiClient.GetProxiesAsync(cancellationToken).ConfigureAwait(false);
-            if (snapshot?.Proxies.TryGetValue(groupName, out var runningGroup) == true && runningGroup.All.Count > 0)
-            {
-                members = runningGroup.All.ToList();
-            }
-        }
-
-        var lookup = nodes.ToLookup(node => node.Name, StringComparer.OrdinalIgnoreCase);
-        var result = new List<ProxyNode>(members.Count);
-        foreach (var name in members.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            var node = lookup[name].FirstOrDefault();
-            if (node is not null)
-            {
-                result.Add(node);
-            }
-            else if (groups.Contains(name) || (configuredMembers.Contains(name, StringComparer.OrdinalIgnoreCase)
-                     && name is "DIRECT" or "REJECT" or "REJECT-DROP" or "PASS" or "COMPATIBLE"))
-            {
-                result.Add(new ProxyNode { Name = name, Type = groups.Contains(name) ? "ProxyGroup" : name });
-            }
-        }
-
-        return result;
     }
 
     private List<NodeCardRow> BuildRows(IReadOnlyList<ProxyNode> nodes, int cardsPerRow)
@@ -679,116 +425,16 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
         return $"{name} ({count})";
     }
 
-    private void RebuildNodeLookup(IEnumerable<ProxyNode> nodes)
+    private void UpdateActiveNode()
     {
-        _nodeLookup.Clear();
-        _activeNodeName = null;
-        _activeGroupName = null;
-
-        foreach (var node in nodes)
+        var activeName = _coreController.ActiveNodeName;
+        var settings = _settingsStore.Settings;
+        foreach (var node in _allNodes)
         {
-            if (!_nodeLookup.TryGetValue(node.Name, out var list))
-            {
-                list = new List<ProxyNode>();
-                _nodeLookup[node.Name] = list;
-            }
-
-            list.Add(node);
-        }
-    }
-
-    private void RebuildDisplayLookup(IReadOnlyList<ProxyNode> nodes)
-    {
-        _displayLookup.Clear();
-        foreach (var node in nodes)
-        {
-            if (!_displayLookup.TryGetValue(node.Name, out var list))
-            {
-                list = new List<ProxyNode>();
-                _displayLookup[node.Name] = list;
-            }
-
-            list.Add(node);
-        }
-    }
-
-    private async Task UpdateActiveNodeAsync()
-    {
-        if (!_isActive || _scopeDisabled)
-        {
-            return;
-        }
-
-        if (Interlocked.Exchange(ref _activeUpdateInProgress, 1) == 1)
-        {
-            return;
-        }
-
-        try
-        {
-            if (Nodes.Count == 0)
-            {
-                _activeNodeName = null;
-                _activeGroupName = null;
-                return;
-            }
-
-            var groupName = GetGroupName();
-            string? activeNode;
-            try
-            {
-                activeNode = await _apiClient.GetSelectedProxyAsync(groupName);
-            }
-            catch
-            {
-                return;
-            }
-
-            if (string.Equals(_activeGroupName, groupName, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(_activeNodeName, activeNode, StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            var previous = _activeNodeName;
-            _activeNodeName = activeNode;
-            _activeGroupName = groupName;
-
-            void Apply()
-            {
-                void SetActive(string? name, bool isActive)
-                {
-                    if (string.IsNullOrWhiteSpace(name))
-                    {
-                        return;
-                    }
-
-                    if (_nodeLookup.TryGetValue(name, out var nodes))
-                    {
-                        foreach (var node in nodes)
-                        {
-                            node.IsActive = isActive;
-                        }
-                    }
-
-                    if (_displayLookup.TryGetValue(name, out var displayed))
-                    {
-                        foreach (var node in displayed)
-                        {
-                            node.IsActive = isActive;
-                        }
-                    }
-                }
-
-                SetActive(previous, false);
-                SetActive(activeNode, true);
-            }
-
-            Dispatch(Apply);
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _activeUpdateInProgress, 0);
+            node.IsActive = !_scopeDisabled && (_coreController.IsRunning
+                ? string.Equals(node.Name, activeName, StringComparison.Ordinal)
+                : string.Equals(node.SourceId, settings.SelectedNodeSourceId, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(RoutingDefaults.OriginalName(node), settings.SelectedNodeName, StringComparison.Ordinal));
         }
     }
 
@@ -808,25 +454,7 @@ public partial class NodesViewModel : ObservableObject, IPageLifecycleAware
     {
         _isActive = false;
         _activeTimer.Stop();
-
-        try
-        {
-            _rowsCts?.Cancel();
-        }
-        catch
-        {
-        }
-    }
-
-    private static void Dispatch(Action action)
-    {
-        if (Application.Current is null)
-        {
-            action();
-            return;
-        }
-
-        Application.Current.Dispatcher.BeginInvoke(action, DispatcherPriority.Background);
+        _loadCts?.Cancel();
     }
 
     private async Task TestAllAsync(Func<ProxyNode, Task<int>> test)

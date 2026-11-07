@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Windows;
 using System.Threading.Tasks;
 using System.Windows.Threading;
@@ -160,9 +160,21 @@ public partial class App : System.Windows.Application
         Current.MainWindow = window;
         var themeService = _host.Services.GetRequiredService<AppThemeService>();
         themeService.ApplyTheme(settingsStore.Settings.Theme, window);
-        window.Show();
+        var settings = settingsStore.Settings;
+        var startInTray = settings.HideToTrayOnWindowsStartup
+            && e.Args.Contains(AutoStartService.StartupArgument, StringComparer.OrdinalIgnoreCase);
+        if (!startInTray)
+        {
+            window.Show();
+        }
 
         base.OnStartup(e);
+
+        if (settings.AutoStartCore)
+        {
+            var viewModel = _host.Services.GetRequiredService<MainWindowViewModel>();
+            await viewModel.ToggleCoreCommand.ExecuteAsync(null);
+        }
     }
 
     private void RegisterCrashHandlers()

@@ -10,6 +10,8 @@ public sealed partial class ProxyNode : ObservableObject
     [ObservableProperty]
     private string _type = string.Empty;
 
+    public string OriginalName { get; set; } = string.Empty;
+
     public string TypeDisplay => GetTypeDisplay(Type);
 
     [ObservableProperty]

@@ -14,11 +14,11 @@ public sealed class MihomoCoreAdapter : IProxyCoreAdapter
 
     public string CoreType => "mihomo";
     public string DisplayName => "Mihomo";
-    public bool SupportsMihomoApi => true;
+    public bool SupportsConfigReload => true;
 
-    public string EnsureConfig(AppSettings settings)
+    public (string Path, string? NodeName) EnsureConfig(AppSettings settings, bool requireSelectedNode = false)
     {
-        return _configWriter.EnsureConfig(settings);
+        return _configWriter.EnsureConfig(settings, requireSelectedNode);
     }
 
     public MihomoLaunchOptions CreateLaunchOptions(AppSettings settings, string configPath)

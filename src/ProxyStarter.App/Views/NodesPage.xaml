@@ -159,46 +159,16 @@
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <Grid Grid.Row="0" Margin="0,0,0,12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-
-                    <WrapPanel Orientation="Horizontal" Margin="0,0,12,0">
-                        <ui:Button Content="{DynamicResource Text_Refresh}" Command="{Binding RefreshNodesCommand}" Margin="0,0,8,8" />
-                        <ui:Button Content="{DynamicResource Text_LocateActiveNode}" Click="OnLocateActiveNodeClick" Margin="0,0,8,8" />
-                        <ui:Button Content="{DynamicResource Text_TcpTest}" Command="{Binding TcpTestCommand}" Margin="0,0,8,8" />
-                        <ui:Button Content="{DynamicResource Text_ConnectTest}" Command="{Binding ConnectTestCommand}" Margin="0,0,8,8" />
-                        <ui:Button Content="{DynamicResource Text_SpeedTest}" Command="{Binding SpeedTestCommand}" Margin="0,0,8,8" />
-                        <ui:Button Content="{DynamicResource Text_TcpTestAll}" Command="{Binding TcpTestAllCommand}" Margin="0,0,8,8" />
-                        <ui:Button Content="{DynamicResource Text_ConnectTestAll}" Command="{Binding ConnectTestAllCommand}" Margin="0,0,8,8" />
-                        <ui:Button Content="{DynamicResource Text_SpeedTestAll}" Command="{Binding SpeedTestAllCommand}" Margin="0,0,8,8" />
-                    </WrapPanel>
-
-                    <StackPanel Grid.Column="1"
-                                Orientation="Horizontal"
-                                VerticalAlignment="Center">
-                        <StackPanel.Style>
-                            <Style TargetType="StackPanel">
-                                <Setter Property="Visibility" Value="Visible" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding ShowSelectionGroup}" Value="False">
-                                        <Setter Property="Visibility" Value="Collapsed" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </StackPanel.Style>
-                        <TextBlock Text="{DynamicResource Text_SelectionGroup}"
-                                   Opacity="0.7"
-                                   Margin="0,0,8,0"
-                                   VerticalAlignment="Center" />
-                        <ComboBox ItemsSource="{Binding Groups}"
-                                  SelectedItem="{Binding SelectedGroup}"
-                                  Width="200"
-                                  Style="{StaticResource CrispComboBoxStyle}" />
-                    </StackPanel>
-                </Grid>
+                <WrapPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
+                    <ui:Button Content="{DynamicResource Text_Refresh}" Command="{Binding RefreshNodesCommand}" Margin="0,0,8,8" />
+                    <ui:Button Content="{DynamicResource Text_LocateActiveNode}" Click="OnLocateActiveNodeClick" Margin="0,0,8,8" />
+                    <ui:Button Content="{DynamicResource Text_TcpTest}" Command="{Binding TcpTestCommand}" Margin="0,0,8,8" />
+                    <ui:Button Content="{DynamicResource Text_ConnectTest}" Command="{Binding ConnectTestCommand}" Margin="0,0,8,8" />
+                    <ui:Button Content="{DynamicResource Text_SpeedTest}" Command="{Binding SpeedTestCommand}" Margin="0,0,8,8" />
+                    <ui:Button Content="{DynamicResource Text_TcpTestAll}" Command="{Binding TcpTestAllCommand}" Margin="0,0,8,8" />
+                    <ui:Button Content="{DynamicResource Text_ConnectTestAll}" Command="{Binding ConnectTestAllCommand}" Margin="0,0,8,8" />
+                    <ui:Button Content="{DynamicResource Text_SpeedTestAll}" Command="{Binding SpeedTestAllCommand}" Margin="0,0,8,8" />
+                </WrapPanel>
 
                 <WrapPanel Grid.Row="1" Margin="0,0,0,12">
                     <ui:TextBox x:Name="NodeSearchBox"

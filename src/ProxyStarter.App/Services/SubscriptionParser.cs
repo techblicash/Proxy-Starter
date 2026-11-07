@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -67,7 +67,6 @@ public sealed class SubscriptionParser
         return new SubscriptionParseResult
         {
             Proxies = proxies,
-            ProxyGroups = new List<Dictionary<string, object>>(),
             Nodes = nodes
         };
     }
@@ -92,7 +91,6 @@ public sealed class SubscriptionParser
 
             var proxies = new List<Dictionary<string, object>>();
             var nodes = new List<ProxyNode>();
-            var groups = new List<Dictionary<string, object>>();
             var ruleProviders = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
             var rules = new List<string>();
 
@@ -117,20 +115,6 @@ public sealed class SubscriptionParser
 
                         nodes.Add(proxyNode);
                     }
-                }
-            }
-
-            if (TryGetChild(mapping, "proxy-groups", out var groupsNode) && groupsNode is YamlSequenceNode groupsSequence)
-            {
-                foreach (var groupNode in groupsSequence.Children.OfType<YamlMappingNode>())
-                {
-                    var group = ConvertMapping(groupNode);
-                    if (group.Count == 0)
-                    {
-                        continue;
-                    }
-
-                    groups.Add(group);
                 }
             }
 
@@ -167,7 +151,6 @@ public sealed class SubscriptionParser
             return new SubscriptionParseResult
             {
                 Proxies = proxies,
-                ProxyGroups = groups,
                 RuleProviders = ruleProviders,
                 Rules = rules,
                 Nodes = nodes

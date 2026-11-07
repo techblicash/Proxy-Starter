@@ -1,4 +1,4 @@
-﻿<ui:FluentWindow x:Class="ProxyStarter.App.Views.TrayMenuWindow"
+<ui:FluentWindow x:Class="ProxyStarter.App.Views.TrayMenuWindow"
                  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -126,22 +126,11 @@
                     Background="{DynamicResource DividerStrokeColorDefaultBrush}"
                     Opacity="0.8" />
 
-            <Grid Grid.Row="3" Margin="0,0,0,10">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-
-                <TextBlock Text="{DynamicResource Text_Node}"
-                           FontSize="16"
-                           FontWeight="SemiBold"
-                           VerticalAlignment="Center" />
-
-                <TextBlock x:Name="NodesGroupText"
-                           Grid.Column="1"
-                           Opacity="0.7"
-                           VerticalAlignment="Center" />
-            </Grid>
+            <TextBlock Grid.Row="3" Margin="0,0,0,10"
+                       Text="{DynamicResource Text_Node}"
+                       FontSize="16"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center" />
 
             <Grid Grid.Row="4">
                 <Grid.RowDefinitions>

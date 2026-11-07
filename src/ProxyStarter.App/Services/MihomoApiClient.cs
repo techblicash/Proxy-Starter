@@ -17,149 +17,10 @@ public sealed class MihomoApiClient
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly AppSettingsStore _settingsStore;
-    private readonly ProxyCatalogStore _proxyCatalogStore;
-    private readonly SemaphoreSlim _proxiesCacheGate = new(1, 1);
-    private MihomoProxiesSnapshot? _proxiesCache;
-    private DateTimeOffset _proxiesCacheAt;
-    private static readonly TimeSpan ProxiesCacheTtl = TimeSpan.FromSeconds(2);
-
-    public MihomoApiClient(IHttpClientFactory httpClientFactory, AppSettingsStore settingsStore, ProxyCatalogStore proxyCatalogStore)
+    public MihomoApiClient(IHttpClientFactory httpClientFactory, AppSettingsStore settingsStore)
     {
         _httpClientFactory = httpClientFactory;
         _settingsStore = settingsStore;
-        _proxyCatalogStore = proxyCatalogStore;
-    }
-
-    public async Task<MihomoProxiesSnapshot?> GetProxiesAsync(CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var cached = _proxiesCache;
-            if (cached is not null && DateTimeOffset.UtcNow - _proxiesCacheAt < ProxiesCacheTtl)
-            {
-                return cached;
-            }
-
-            await _proxiesCacheGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                cached = _proxiesCache;
-                if (cached is not null && DateTimeOffset.UtcNow - _proxiesCacheAt < ProxiesCacheTtl)
-                {
-                    return cached;
-                }
-
-                using var client = CreateClient();
-                using var response = await client.GetAsync("proxies", cancellationToken).ConfigureAwait(false);
-                if (!response.IsSuccessStatusCode)
-                {
-                    return null;
-                }
-
-                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-                using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
-                if (!document.RootElement.TryGetProperty("proxies", out var proxiesElement))
-                {
-                    return null;
-                }
-
-                var entries = new Dictionary<string, MihomoProxy>(StringComparer.OrdinalIgnoreCase);
-                foreach (var property in proxiesElement.EnumerateObject())
-                {
-                    var proxy = ParseProxy(property.Name, property.Value);
-                    entries[property.Name] = proxy;
-                }
-
-                var snapshot = new MihomoProxiesSnapshot(entries);
-                _proxiesCache = snapshot;
-                _proxiesCacheAt = DateTimeOffset.UtcNow;
-                return snapshot;
-            }
-            finally
-            {
-                _proxiesCacheGate.Release();
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex) when (IsApiFailure(ex))
-        {
-            return null;
-        }
-    }
-
-    public async Task<string?> GetSelectedProxyAsync(string groupName, CancellationToken cancellationToken = default)
-    {
-        var snapshot = await GetProxiesAsync(cancellationToken).ConfigureAwait(false);
-        if (snapshot is null)
-        {
-            return null;
-        }
-
-        return snapshot.Proxies.TryGetValue(groupName, out var proxy) ? proxy.Now : null;
-    }
-
-    public async Task<string?> GetResolvedSelectedProxyAsync(string groupName, CancellationToken cancellationToken = default)
-    {
-        var snapshot = await GetProxiesAsync(cancellationToken).ConfigureAwait(false);
-        if (snapshot is null)
-        {
-            return null;
-        }
-
-        foreach (var candidate in BuildGroupCandidates(snapshot, groupName))
-        {
-            var resolved = ResolveSelectedProxy(snapshot, candidate);
-            if (!string.IsNullOrWhiteSpace(resolved))
-            {
-                return resolved;
-            }
-        }
-
-        return null;
-    }
-
-    public async Task<bool> SetProxySelectionAsync(string groupName, string proxyName, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(proxyName))
-            {
-                return false;
-            }
-
-            if (await PutProxySelectionAsync(groupName, proxyName, cancellationToken).ConfigureAwait(false))
-            {
-                return true;
-            }
-
-            InvalidateProxiesCache();
-            var snapshot = await GetProxiesAsync(cancellationToken).ConfigureAwait(false);
-            if (snapshot is null)
-            {
-                return false;
-            }
-
-            foreach (var candidate in BuildSelectionCandidates(snapshot, groupName, proxyName))
-            {
-                if (await PutProxySelectionAsync(candidate, proxyName, cancellationToken).ConfigureAwait(false))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex) when (IsApiFailure(ex))
-        {
-            return false;
-        }
     }
 
     public async Task<int> TestDelayAsync(string proxyName, int timeoutMs = 5000, CancellationToken cancellationToken = default)
@@ -193,33 +54,41 @@ public sealed class MihomoApiClient
         }
     }
 
-    public async Task<bool> SetModeAsync(string mode, CancellationToken cancellationToken = default)
+    internal async Task ReloadConfigAsync(string configPath, CancellationToken cancellationToken)
     {
-        try
+        using var client = CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(20);
+        var payload = JsonSerializer.Serialize(new { path = Path.GetFullPath(configPath) });
+        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        using var response = await client.PutAsync("configs?force=true", content, cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
         {
-            using var client = CreateClient();
-            var payload = JsonSerializer.Serialize(new { mode });
-            using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-            using var request = new HttpRequestMessage(new HttpMethod("PATCH"), "configs")
+            var details = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            throw new HttpRequestException($"Core configuration update failed (HTTP {(int)response.StatusCode}). {details}");
+        }
+    }
+
+    internal async Task WaitUntilReadyAsync(CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        using var client = CreateClient();
+        client.Timeout = Timeout.InfiniteTimeSpan;
+        while (true)
+        {
+            try
             {
-                Content = content
-            };
-            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
-            var success = response.IsSuccessStatusCode;
-            if (success)
+                using var response = await client.GetAsync("version", timeout.Token).ConfigureAwait(false);
+                if (response.IsSuccessStatusCode)
+                {
+                    return;
+                }
+            }
+            catch (HttpRequestException)
             {
-                InvalidateProxiesCache();
             }
 
-            return success;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex) when (IsApiFailure(ex))
-        {
-            return false;
+            await Task.Delay(150, timeout.Token).ConfigureAwait(false);
         }
     }
 
@@ -334,26 +203,6 @@ public sealed class MihomoApiClient
         return client;
     }
 
-    private static MihomoProxy ParseProxy(string name, JsonElement element)
-    {
-        var type = element.TryGetProperty("type", out var typeElement) ? typeElement.GetString() ?? string.Empty : string.Empty;
-        var now = element.TryGetProperty("now", out var nowElement) ? nowElement.GetString() : null;
-        var all = new List<string>();
-
-        if (element.TryGetProperty("all", out var allElement) && allElement.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in allElement.EnumerateArray())
-            {
-                if (item.ValueKind == JsonValueKind.String)
-                {
-                    all.Add(item.GetString() ?? string.Empty);
-                }
-            }
-        }
-
-        return new MihomoProxy(name, type, now, all);
-    }
-
     private static string? ExtractAddress(JsonElement metadata)
     {
         if (metadata.TryGetProperty("host", out var hostElement))
@@ -463,187 +312,6 @@ public sealed class MihomoApiClient
         }
 
         return 0;
-    }
-
-    private void InvalidateProxiesCache()
-    {
-        _proxiesCache = null;
-        _proxiesCacheAt = default;
-    }
-
-    private async Task<bool> PutProxySelectionAsync(string groupName, string proxyName, CancellationToken cancellationToken)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(groupName))
-            {
-                return false;
-            }
-
-            using var client = CreateClient();
-            var payload = JsonSerializer.Serialize(new { name = proxyName });
-            using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-            using var response = await client.PutAsync($"proxies/{Uri.EscapeDataString(groupName)}", content, cancellationToken).ConfigureAwait(false);
-            var success = response.IsSuccessStatusCode;
-            if (success)
-            {
-                InvalidateProxiesCache();
-            }
-
-            return success;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex) when (IsApiFailure(ex))
-        {
-            return false;
-        }
-    }
-
-    private IEnumerable<string> BuildSelectionCandidates(
-        MihomoProxiesSnapshot snapshot,
-        string requestedGroup,
-        string proxyName)
-    {
-        var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        bool Yield(string group)
-        {
-            if (string.IsNullOrWhiteSpace(group))
-            {
-                return false;
-            }
-
-            if (!yielded.Add(group))
-            {
-                return false;
-            }
-
-            if (!snapshot.Proxies.ContainsKey(group))
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        var effectiveGroup = _proxyCatalogStore.ResolveSelectionGroup(_settingsStore.Settings);
-
-        if (Yield(effectiveGroup))
-        {
-            yield return effectiveGroup;
-        }
-
-        if (Yield(_settingsStore.Settings.SelectionGroup))
-        {
-            yield return _settingsStore.Settings.SelectionGroup;
-        }
-
-        if (Yield(RoutingDefaults.FlatModeSelectionGroup))
-        {
-            yield return RoutingDefaults.FlatModeSelectionGroup;
-        }
-
-        if (Yield("GLOBAL"))
-        {
-            yield return "GLOBAL";
-        }
-
-        var selectorGroups = snapshot.Proxies.Values
-            .Where(proxy => proxy.All.Count > 0)
-            .Where(proxy => proxy.All.Contains(proxyName, StringComparer.Ordinal))
-            .OrderByDescending(proxy => string.Equals(proxy.Type, "Selector", StringComparison.OrdinalIgnoreCase))
-            .ThenByDescending(proxy => string.Equals(proxy.Name, requestedGroup, StringComparison.OrdinalIgnoreCase))
-            .Select(proxy => proxy.Name);
-
-        foreach (var group in selectorGroups)
-        {
-            if (Yield(group))
-            {
-                yield return group;
-            }
-        }
-    }
-
-    private static string? ResolveSelectedProxy(MihomoProxiesSnapshot snapshot, string groupName)
-    {
-        if (string.IsNullOrWhiteSpace(groupName))
-        {
-            return null;
-        }
-
-        var current = groupName;
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        while (visited.Add(current))
-        {
-            if (!snapshot.Proxies.TryGetValue(current, out var proxy))
-            {
-                return current.Equals(groupName, StringComparison.OrdinalIgnoreCase) ? null : current;
-            }
-
-            if (string.IsNullOrWhiteSpace(proxy.Now))
-            {
-                return current.Equals(groupName, StringComparison.OrdinalIgnoreCase) ? null : current;
-            }
-
-            if (!snapshot.Proxies.TryGetValue(proxy.Now, out var selected) || selected.All.Count == 0)
-            {
-                return proxy.Now;
-            }
-
-            current = proxy.Now;
-        }
-
-        return current.Equals(groupName, StringComparison.OrdinalIgnoreCase) ? null : current;
-    }
-
-    private IEnumerable<string> BuildGroupCandidates(MihomoProxiesSnapshot snapshot, string requestedGroup)
-    {
-        var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        bool Yield(string group)
-        {
-            return !string.IsNullOrWhiteSpace(group) && yielded.Add(group);
-        }
-
-        if (Yield(requestedGroup))
-        {
-            yield return requestedGroup;
-        }
-
-        var effectiveGroup = _proxyCatalogStore.ResolveSelectionGroup(_settingsStore.Settings);
-        if (Yield(effectiveGroup))
-        {
-            yield return effectiveGroup;
-        }
-
-        if (Yield(_settingsStore.Settings.SelectionGroup))
-        {
-            yield return _settingsStore.Settings.SelectionGroup;
-        }
-
-        if (Yield(RoutingDefaults.FlatModeSelectionGroup))
-        {
-            yield return RoutingDefaults.FlatModeSelectionGroup;
-        }
-
-        if (Yield("GLOBAL"))
-        {
-            yield return "GLOBAL";
-        }
-
-        foreach (var group in snapshot.Proxies.Values
-                     .Where(proxy => proxy.All.Count > 0)
-                     .OrderByDescending(proxy => proxy.Type.Equals("Selector", StringComparison.OrdinalIgnoreCase))
-                     .ThenBy(proxy => proxy.Name, StringComparer.OrdinalIgnoreCase))
-        {
-            if (Yield(group.Name))
-            {
-                yield return group.Name;
-            }
-        }
     }
 
     private static bool IsApiFailure(Exception exception)

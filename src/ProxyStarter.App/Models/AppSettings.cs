@@ -15,8 +15,12 @@ public sealed class AppSettings
     public string Mode { get; set; } = "rule";
     public string LogLevel { get; set; } = "info";
     public int LogRetentionCount { get; set; } = 50;
-    public string SelectionGroup { get; set; } = string.Empty;
+    public string SelectedNodeName { get; set; } = string.Empty;
+    public string SelectedNodeSourceId { get; set; } = string.Empty;
+    public string SubscriptionRulesProfileId { get; set; } = string.Empty;
     public bool AutoStart { get; set; } = false;
+    public bool AutoStartCore { get; set; } = true;
+    public bool HideToTrayOnWindowsStartup { get; set; }
     public string UpdateFeedUrl { get; set; } = global::ProxyStarter.App.Services.SoftwareUpdateDefaults.FeedUrl;
     public string Theme { get; set; } = "Light";
 

@@ -6,7 +6,6 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Http;
@@ -148,160 +147,101 @@ public sealed class SubscriptionService
     {
         var proxies = new List<Dictionary<string, object>>();
         var nodes = new List<ProxyNode>();
-        var groups = new List<Dictionary<string, object>>();
-        var ruleProviders = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-        var rules = new List<string>();
-
         var outboundNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL", "block"
+            "DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL", "DNS", "RE-MATCH", "block"
         };
-        var providerNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var profile in profiles.Where(profile => profile.IsEnabled && !string.IsNullOrWhiteSpace(profile.Id)))
         {
-            var parsed = LoadProfileConfig(profile);
-            var profileNodes = parsed.Proxies.Select(RoutingDefaults.GroupName)
-                .Where(name => !string.IsNullOrWhiteSpace(name)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var name in profileNodes.Concat(parsed.ProxyGroups.Select(RoutingDefaults.GroupName))
-                         .Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                names[name] = UniqueName(outboundNames, name, profile.Name);
-            }
+            var (profileNodes, profileProxies) = LoadProfileOutbounds(profile);
+            var namedProxies = profileProxies.Where(proxy => !string.IsNullOrWhiteSpace(RoutingDefaults.OutboundName(proxy)))
+                .DistinctBy(RoutingDefaults.OutboundName, StringComparer.OrdinalIgnoreCase).ToList();
+            var names = namedProxies.ToDictionary(RoutingDefaults.OutboundName,
+                proxy => UniqueName(outboundNames, RoutingDefaults.OutboundName(proxy), profile.Name),
+                StringComparer.OrdinalIgnoreCase);
 
-            string MapName(string name) => names.GetValueOrDefault(name, name);
-
-            foreach (var proxy in parsed.Proxies.DistinctBy(RoutingDefaults.GroupName, StringComparer.OrdinalIgnoreCase))
+            foreach (var proxy in namedProxies)
             {
-                var name = RoutingDefaults.GroupName(proxy);
-                if (string.IsNullOrWhiteSpace(name))
+                proxy["name"] = names[RoutingDefaults.OutboundName(proxy)];
+                if (proxy.TryGetValue("dialer-proxy", out var dialer) && dialer is string reference)
                 {
-                    continue;
+                    if (names.TryGetValue(reference, out var nodeName))
+                    {
+                        proxy["dialer-proxy"] = nodeName;
+                    }
+                    else if (!reference.Equals("DIRECT", StringComparison.OrdinalIgnoreCase))
+                    {
+                        proxy.Remove("dialer-proxy");
+                    }
                 }
-
-                proxy["name"] = MapName(name);
-                RewriteReference(proxy, "dialer-proxy", MapName);
                 proxies.Add(proxy);
             }
 
-            foreach (var node in parsed.Nodes.DistinctBy(node => node.Name, StringComparer.OrdinalIgnoreCase))
+            foreach (var node in profileNodes.DistinctBy(node => node.Name, StringComparer.OrdinalIgnoreCase))
             {
-                node.Name = MapName(node.Name);
-                node.SourceId = profile.Id;
-                nodes.Add(node);
-            }
-
-            foreach (var group in parsed.ProxyGroups.DistinctBy(RoutingDefaults.GroupName, StringComparer.OrdinalIgnoreCase))
-            {
-                var name = RoutingDefaults.GroupName(group);
-                if (string.IsNullOrWhiteSpace(name) || profileNodes.Contains(name))
+                if (!names.TryGetValue(node.Name, out var name))
                 {
                     continue;
                 }
 
-                PrepareGroup(group, profileNodes);
-                group["name"] = MapName(name);
-                group["proxies"] = RoutingDefaults.Names(group, "proxies").Select(MapName).ToList();
-                RewriteReference(group, "default-selected", MapName);
-                RewriteReference(group, "empty-fallback", MapName);
-                group[RoutingDefaults.GroupSourceKey] = profile.Id;
-                groups.Add(group);
+                node.OriginalName = node.Name;
+                node.Name = name;
+                node.SourceId = profile.Id;
+                nodes.Add(node);
             }
-
-            var providerAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var provider in parsed.RuleProviders)
-            {
-                var name = UniqueName(providerNames, provider.Key, profile.Name);
-                providerAliases[provider.Key] = name;
-                if (name != provider.Key && provider.Value is Dictionary<string, object> definition
-                    && definition.ContainsKey("url"))
-                {
-                    definition.Remove("path");
-                }
-                ruleProviders[name] = provider.Value;
-            }
-
-            rules.AddRange(parsed.Rules.Select(rule => RoutingDefaults.RewriteRule(
-                rule, MapName, name => providerAliases.GetValueOrDefault(name, name))));
         }
 
-        _proxyCatalogStore.Save(nodes, proxies, groups, ruleProviders, rules);
+        _proxyCatalogStore.Save(nodes, proxies);
     }
 
-    private SubscriptionParseResult LoadProfileConfig(SubscriptionProfile profile)
+    public IReadOnlyList<SubscriptionProfile> GetRuleSources()
+    {
+        return _subscriptionStore.Load().Where(profile => profile.IsEnabled && ReadRoutingRules(profile).Rules.Count > 0).ToList();
+    }
+
+    internal (IReadOnlyList<string> Rules, IReadOnlyDictionary<string, object> Providers) LoadRoutingRules(string profileId)
+    {
+        var profile = string.IsNullOrWhiteSpace(profileId) ? null : _subscriptionStore.Load()
+            .FirstOrDefault(profile => profile.IsEnabled && profile.Id.Equals(profileId, StringComparison.OrdinalIgnoreCase));
+        return profile is null ? (Array.Empty<string>(), new Dictionary<string, object>()) : ReadRoutingRules(profile);
+    }
+
+    private (IReadOnlyList<string> Rules, IReadOnlyDictionary<string, object> Providers) ReadRoutingRules(SubscriptionProfile profile)
+    {
+        var rules = _cacheStore.LoadRules(profile.Id);
+        var providers = _cacheStore.LoadRuleProviders(profile.Id);
+        if (rules.Count > 0 && providers.Count > 0)
+        {
+            return (rules, providers);
+        }
+
+        // Older caches for provider subscriptions omitted the top-level routing configuration.
+        var parsed = _subscriptionParser.Parse(_cacheStore.LoadRaw(profile.Id), profile.Name, profile.Id);
+        return (rules.Count > 0 ? rules : parsed.Rules, providers.Count > 0 ? providers : parsed.RuleProviders);
+    }
+
+    private (IReadOnlyList<ProxyNode> Nodes, IReadOnlyList<Dictionary<string, object>> Proxies)
+        LoadProfileOutbounds(SubscriptionProfile profile)
     {
         var raw = _cacheStore.LoadRaw(profile.Id);
-        var parsed = _subscriptionParser.Parse(raw, profile.Name, profile.Id);
-        if (parsed.Nodes.Count > 0 && !TryGetProxyProviderUrls(raw, out _))
+        if (!TryGetProxyProviderUrls(raw, out _))
         {
-            _cacheStore.Save(profile.Id, parsed);
-            return parsed;
+            var parsed = _subscriptionParser.Parse(raw, profile.Name, profile.Id);
+            if (parsed.Nodes.Count > 0)
+            {
+                _cacheStore.Save(profile.Id, parsed);
+                return (parsed.Nodes, parsed.Proxies);
+            }
         }
 
-        var groups = _cacheStore.LoadGroups(profile.Id);
-        return new SubscriptionParseResult
-        {
-            Proxies = _cacheStore.LoadProxies(profile.Id),
-            Nodes = _cacheStore.LoadNodes(profile.Id),
-            ProxyGroups = groups.Count > 0 ? groups : parsed.ProxyGroups,
-            RuleProviders = parsed.RuleProviders.Count > 0 ? parsed.RuleProviders : _cacheStore.LoadRuleProviders(profile.Id),
-            Rules = parsed.Rules.Count > 0 ? parsed.Rules : _cacheStore.LoadRules(profile.Id)
-        };
-    }
-
-    private static void PrepareGroup(Dictionary<string, object> group, IEnumerable<string> profileNodes)
-    {
-        if (string.IsNullOrWhiteSpace(group.GetValueOrDefault("type")?.ToString()))
-        {
-            group["type"] = "select";
-        }
-
-        var members = RoutingDefaults.Names(group, "proxies").ToList();
-        var fromProviders = group.Remove("use");
-        var includeAll = group.Remove("include-all", out var all) && IsTrue(all);
-        var includeProxies = group.Remove("include-all-proxies", out var proxies) && IsTrue(proxies);
-        var includeProviders = group.Remove("include-all-providers", out var providers) && IsTrue(providers);
-        if (fromProviders || includeAll || includeProxies || includeProviders)
-        {
-            members.AddRange(FilterNodes(group, profileNodes.OrderBy(name => name, StringComparer.Ordinal)));
-        }
-
-        group["proxies"] = members.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-    }
-
-    private static IEnumerable<string> FilterNodes(Dictionary<string, object> group, IEnumerable<string> nodes)
-    {
-        var include = group.GetValueOrDefault("filter")?.ToString();
-        var exclude = group.GetValueOrDefault("exclude-filter")?.ToString();
-        try
-        {
-            var timeout = TimeSpan.FromMilliseconds(100);
-            var includeFilter = string.IsNullOrWhiteSpace(include) ? null : new Regex(include, RegexOptions.None, timeout);
-            var excludeFilter = string.IsNullOrWhiteSpace(exclude) ? null : new Regex(exclude, RegexOptions.None, timeout);
-            return nodes.Where(name => (includeFilter?.IsMatch(name) ?? true)
-                && !(excludeFilter?.IsMatch(name) ?? false)).ToList();
-        }
-        catch (Exception ex) when (ex is ArgumentException or RegexMatchTimeoutException)
-        {
-            CrashLogger.Log(ex, "SubscriptionService: Group filter");
-            return Array.Empty<string>();
-        }
-    }
-
-    private static bool IsTrue(object? value) =>
-        bool.TryParse(value?.ToString(), out var enabled) && enabled;
-
-    private static void RewriteReference(Dictionary<string, object> outbound, string key, Func<string, string> mapName)
-    {
-        if (outbound.TryGetValue(key, out var value) && value is string name)
-        {
-            outbound[key] = mapName(name);
-        }
+        return (_cacheStore.LoadNodes(profile.Id), _cacheStore.LoadProxies(profile.Id));
     }
 
     private static string UniqueName(HashSet<string> used, string name, string profileName)
     {
+        name = name.Replace(',', '，').Replace('\r', ' ').Replace('\n', ' ').Trim();
+        profileName = profileName.Replace(',', '，').Replace('\r', ' ').Replace('\n', ' ');
         if (used.Add(name))
         {
             return name;
@@ -628,32 +568,13 @@ public sealed class SubscriptionService
         SubscriptionParseResult subscription, IReadOnlyDictionary<string, SubscriptionParseResult> providers)
     {
         var providerProxies = providers.Values.SelectMany(result => result.Proxies).ToList();
-        var proxies = subscription.Proxies.Concat(providerProxies).DistinctBy(RoutingDefaults.GroupName).ToList();
+        var proxies = subscription.Proxies.Concat(providerProxies).DistinctBy(RoutingDefaults.OutboundName).ToList();
         var nodes = subscription.Nodes.Concat(providers.Values.SelectMany(result => result.Nodes))
             .DistinctBy(node => node.Name).ToList();
-        var groups = subscription.ProxyGroups.Count > 0
-            ? subscription.ProxyGroups
-            : providers.Values.SelectMany(result => result.ProxyGroups).ToList();
-
-        foreach (var group in groups)
-        {
-            var providerNames = RoutingDefaults.Names(group, "use").ToList();
-            var includesAll = IsTrue(group.GetValueOrDefault("include-all"))
-                || IsTrue(group.GetValueOrDefault("include-all-providers"));
-            var members = includesAll ? providerProxies : providerNames
-                .Where(providers.ContainsKey)
-                .SelectMany(name => providers[name].Proxies);
-            var expanded = FilterNodes(group, members.Select(RoutingDefaults.GroupName));
-            group["proxies"] = RoutingDefaults.Names(group, "proxies").Concat(expanded).ToList();
-            group.Remove("use");
-            group.Remove("include-all-providers");
-        }
-
         return new SubscriptionParseResult
         {
             Proxies = proxies,
             Nodes = nodes,
-            ProxyGroups = groups,
             RuleProviders = subscription.RuleProviders,
             Rules = subscription.Rules
         };

@@ -83,7 +83,6 @@
     <sys:String x:Key="Text_ConfigPathHint">Path to the active config file</sys:String>
     <sys:String x:Key="Text_ApiSecret">API Secret</sys:String>
     <sys:String x:Key="Text_ApiSecretHint">Secret for connecting to the core API</sys:String>
-    <sys:String x:Key="Text_SelectionGroup">Selection Group</sys:String>
     <sys:String x:Key="Text_Features">Features</sys:String>
     <sys:String x:Key="Text_AllowLan">Allow LAN</sys:String>
     <sys:String x:Key="Text_AllowLanHint">Allow LAN devices to use the proxy</sys:String>
@@ -132,7 +131,7 @@
 
     <sys:String x:Key="Text_EditFile">Edit File</sys:String>
     <sys:String x:Key="Text_EditSubscriptionFile">Edit Subscription File</sys:String>
-    <sys:String x:Key="Text_SubscriptionFileHint">Edit the raw subscription content. Saving will update nodes and groups.</sys:String>
+    <sys:String x:Key="Text_SubscriptionFileHint">Edit the raw subscription content. Saving will update nodes and routing rules.</sys:String>
 
     <sys:String x:Key="DialogOk">OK</sys:String>
     <sys:String x:Key="DialogClose">Close</sys:String>
@@ -163,9 +162,9 @@
     <sys:String x:Key="Error_ModeUpdate_Title">Mode Update Failed</sys:String>
     <sys:String x:Key="Error_ModeUpdate_Body">Could not change the routing mode. Check whether the core is running.</sys:String>
     <sys:String x:Key="Error_RulesSave_Title">Rules Save Failed</sys:String>
-    <sys:String x:Key="Error_RulesSave_Body">Could not save custom rules.</sys:String>
+    <sys:String x:Key="Error_RulesSave_Body">Could not save or apply routing rules.</sys:String>
     <sys:String x:Key="Error_NodeSelection_Title">Selection Failed</sys:String>
-    <sys:String x:Key="Error_NodeSelection_Body">Could not switch the node or group. Check whether the core is running and the target is available.</sys:String>
+    <sys:String x:Key="Error_NodeSelection_Body">Could not switch to the selected node. Check whether it is available and supported by the configured core.</sys:String>
     <sys:String x:Key="Error_QosApply_Title">QoS Apply Failed</sys:String>
     <sys:String x:Key="Error_QosApply_Body">Could not apply the speed limit.</sys:String>
     <sys:String x:Key="Error_RestartRequired_Title">Restart Required</sys:String>
@@ -184,4 +183,11 @@
     <sys:String x:Key="Text_NodeSearchPlaceholder">Search node name or address</sys:String>
     <sys:String x:Key="Text_FindNode">Find next</sys:String>
     <sys:String x:Key="Text_NoMatchingNodes">No matching nodes</sys:String>
+    <sys:String x:Key="Text_SubscriptionRoutingRules">Subscription routing rules</sys:String>
+    <sys:String x:Key="Text_SubscriptionRoutingRulesHint">Rule mode applies custom rules first, then the selected subscription rules, then the built-in mainland China bypass rules. Proxied traffic uses the selected node. Clash rule sets (RULE-SET) require Mihomo.</sys:String>
+    <sys:String x:Key="Text_NoSubscriptionRules">Use built-in and custom rules</sys:String>
+    <sys:String x:Key="Text_AutoStartCore">Start the core when the app opens</sys:String>
+    <sys:String x:Key="Text_AutoStartCoreHint">Launch the proxy core when Proxy Starter starts</sys:String>
+    <sys:String x:Key="Text_HideToTrayOnWindowsStartup">Start in the tray with Windows</sys:String>
+    <sys:String x:Key="Text_HideToTrayOnWindowsStartupHint">When Windows launches the app, open its main window from the system tray</sys:String>
 </ResourceDictionary>

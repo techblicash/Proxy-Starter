@@ -27,6 +27,24 @@
                 </StackPanel>
             </ui:Card>
 
+            <ui:Card Padding="16" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="{DynamicResource Text_SubscriptionRoutingRules}" FontSize="16" FontWeight="SemiBold" />
+                    <TextBlock Text="{DynamicResource Text_SubscriptionRoutingRulesHint}" Margin="0,8,0,0"
+                               Opacity="0.7" TextWrapping="Wrap" />
+                    <WrapPanel Margin="0,12,0,0">
+                        <ComboBox ItemsSource="{Binding SubscriptionRuleSources}"
+                                  DisplayMemberPath="Name"
+                                  SelectedValuePath="Id"
+                                  SelectedValue="{Binding SelectedSubscriptionRulesId}"
+                                  Width="250"
+                                  Style="{StaticResource CrispComboBoxStyle}"
+                                  Margin="0,0,12,0" />
+                        <ui:Button Content="{DynamicResource Text_Save}" Command="{Binding SaveSubscriptionRulesCommand}" />
+                    </WrapPanel>
+                </StackPanel>
+            </ui:Card>
+
             <ui:Card Padding="16">
                 <StackPanel>
                     <TextBlock Text="{DynamicResource Text_CustomRules}" FontSize="16" FontWeight="SemiBold" />

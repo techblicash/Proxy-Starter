@@ -20,8 +20,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
     private readonly SubscriptionService _subscriptionService;
     private readonly ProxyCatalogStore _proxyCatalogStore;
     private readonly SubscriptionCacheStore _cacheStore;
-    private readonly MihomoApiClient _apiClient;
-    private readonly AppSettingsStore _settingsStore;
+    private readonly CoreController _coreController;
     private readonly IDialogService _dialogService;
     private readonly DispatcherTimer _activeTimer;
     private readonly HashSet<SubscriptionProfile> _attachedProfiles = new(ReferenceEqualityComparer.Instance);
@@ -38,16 +37,14 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
         SubscriptionService subscriptionService,
         ProxyCatalogStore proxyCatalogStore,
         SubscriptionCacheStore cacheStore,
-        MihomoApiClient apiClient,
-        AppSettingsStore settingsStore,
+        CoreController coreController,
         IDialogService dialogService)
     {
         _subscriptionStore = subscriptionStore;
         _subscriptionService = subscriptionService;
         _proxyCatalogStore = proxyCatalogStore;
         _cacheStore = cacheStore;
-        _apiClient = apiClient;
-        _settingsStore = settingsStore;
+        _coreController = coreController;
         _dialogService = dialogService;
         Profiles = new ObservableCollection<SubscriptionProfile>(_subscriptionStore.Load());
         _selectedProfile = Profiles.FirstOrDefault(profile => profile.Id == _subscriptionStore.SelectedProfileId);
@@ -61,7 +58,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
         {
             Interval = TimeSpan.FromSeconds(3)
         };
-        _activeTimer.Tick += async (_, _) => await UpdateActiveProfileAsync();
+        _activeTimer.Tick += (_, _) => UpdateActiveProfile();
         // Timer runs only while the Profiles page is visible.
     }
 
@@ -98,7 +95,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
 
             ReplaceProfiles(_subscriptionStore.Load());
 
-            await UpdateActiveProfileAsync();
+            UpdateActiveProfile();
             await _dialogService.ShowInfoAsync("Subscription Added", $"Fetched {profile.NodeCount} nodes.");
         }
         catch (System.Exception ex)
@@ -134,7 +131,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
             await _subscriptionService.RefreshProfileAsync(SelectedProfile);
             PersistProfiles(rebuildCatalog: false);
             _subscriptionService.RebuildCatalogFromCache(Profiles);
-            await UpdateActiveProfileAsync();
+            UpdateActiveProfile();
 
             await _dialogService.ShowInfoAsync("Subscription Updated", $"Fetched {SelectedProfile.NodeCount} nodes.");
         }
@@ -157,7 +154,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
     }
 
     [RelayCommand]
-    private async Task EditSelectedAsync()
+    private void EditSelected()
     {
         if (SelectedProfile is null)
         {
@@ -184,7 +181,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
         }
 
         PersistProfiles(rebuildCatalog: true);
-        await UpdateActiveProfileAsync();
+        UpdateActiveProfile();
     }
 
     [RelayCommand]
@@ -235,7 +232,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
             }
 
             PersistProfiles(rebuildCatalog: true);
-            await UpdateActiveProfileAsync();
+            UpdateActiveProfile();
         }
         catch (Exception ex)
         {
@@ -261,7 +258,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
         await _subscriptionService.RefreshAllAsync();
         ReplaceProfiles(_subscriptionStore.Load());
 
-        await UpdateActiveProfileAsync();
+        UpdateActiveProfile();
     }
 
     [RelayCommand]
@@ -289,7 +286,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
         SelectedProfile = null;
         Profiles.Remove(profile);
         PersistProfiles(rebuildCatalog: true);
-        await UpdateActiveProfileAsync();
+        UpdateActiveProfile();
     }
 
     private void OnProfilesCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -383,23 +380,14 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
         }
     }
 
-    private async Task UpdateActiveProfileAsync()
+    private void UpdateActiveProfile()
     {
         if (!_isActive)
         {
             return;
         }
 
-        var settings = _settingsStore.Settings;
-        var groupName = _proxyCatalogStore.ResolveSelectionGroup(settings);
-        string? activeNode = null;
-        try
-        {
-            activeNode = await _apiClient.GetResolvedSelectedProxyAsync(groupName);
-        }
-        catch
-        {
-        }
+        var activeNode = _coreController.IsRunning ? _coreController.ActiveNodeName : null;
         var activeProfileId = string.Empty;
 
         if (!string.IsNullOrWhiteSpace(activeNode))
@@ -432,7 +420,7 @@ public partial class ProfilesViewModel : ObservableObject, IPageLifecycleAware
 
         _isActive = true;
         _activeTimer.Start();
-        _ = UpdateActiveProfileAsync();
+        UpdateActiveProfile();
     }
 
     public void OnPageDeactivated()

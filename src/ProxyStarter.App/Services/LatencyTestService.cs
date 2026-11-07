@@ -334,16 +334,7 @@ public sealed class LatencyTestService
             ["tcp-concurrent"] = true,
             ["dns"] = MihomoDnsConfig.Build(dnsPort, "127.0.0.1"),
             ["proxies"] = new List<Dictionary<string, object>> { proxy },
-            ["proxy-groups"] = new List<Dictionary<string, object>>
-            {
-                new()
-                {
-                    ["name"] = "PROXY",
-                    ["type"] = "select",
-                    ["proxies"] = new[] { proxyName }
-                }
-            },
-            ["rules"] = new[] { "MATCH,PROXY" }
+            ["rules"] = new[] { $"MATCH,{proxyName}" }
         };
     }
 

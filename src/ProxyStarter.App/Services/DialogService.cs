@@ -80,7 +80,7 @@ public sealed class DialogService : IDialogService
     {
         var dialog = new AddSubscriptionDialog
         {
-            Owner = Application.Current?.MainWindow
+            Owner = Application.Current?.MainWindow is { IsVisible: true } owner ? owner : null
         };
 
         var result = dialog.ShowDialog();
@@ -109,7 +109,7 @@ public sealed class DialogService : IDialogService
 
         var dialog = new AddSubscriptionDialog
         {
-            Owner = Application.Current?.MainWindow
+            Owner = Application.Current?.MainWindow is { IsVisible: true } owner ? owner : null
         };
 
         dialog.SetProfile(existing.Name, existing.Url, existing.AutoUpdateEnabled, existing.AutoUpdateIntervalMinutes, isEditMode: true);
@@ -146,7 +146,7 @@ public sealed class DialogService : IDialogService
     {
         var dialog = new EditSubscriptionFileDialog
         {
-            Owner = Application.Current?.MainWindow
+            Owner = Application.Current?.MainWindow is { IsVisible: true } owner ? owner : null
         };
 
         dialog.SetContent(profileName, content);
@@ -189,7 +189,7 @@ public sealed class DialogService : IDialogService
             IsSecondaryButtonEnabled = hasSecondary,
             IsCloseButtonEnabled = false,
             ShowTitle = true,
-            Owner = Application.Current?.MainWindow
+            Owner = Application.Current?.MainWindow is { IsVisible: true } owner ? owner : null
         };
 
         return dialog;
